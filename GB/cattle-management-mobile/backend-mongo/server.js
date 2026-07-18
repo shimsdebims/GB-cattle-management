@@ -6,6 +6,9 @@ const rateLimit = require('express-rate-limit');
 const morgan = require('morgan');
 require('dotenv').config();
 
+// Import middleware
+const { errorHandler } = require('./middleware');
+
 const app = express();
 const PORT = process.env.PORT || 8080;
 
@@ -55,17 +58,15 @@ app.get('/api/health', (req, res) => {
 
 // 404 handler
 app.use('*', (req, res) => {
-  res.status(404).json({ error: 'Route not found' });
-});
-
-// Error handling middleware
-app.use((error, req, res, next) => {
-  console.error(error.stack);
-  res.status(500).json({ 
-    error: 'Something went wrong!',
-    message: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+  res.status(404).json({
+    success: false,
+    error: 'Route not found',
+    timestamp: new Date().toISOString(),
   });
 });
+
+// Error handling middleware (MUST be last)
+app.use(errorHandler);
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
