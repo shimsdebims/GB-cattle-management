@@ -19,11 +19,12 @@ npm install
 ```
 
 ### 1.2 Update MongoDB Connection
-Your MongoDB is already configured! Check `.env` file:
+Copy `.env.example` to `.env` and fill in your credentials:
 ```bash
-cat .env
+cp .env.example .env
+# Then edit .env and set MONGODB_URI=<YOUR_MONGODB_URI>
 ```
-**Current connection**: `mongodb+srv://shimasarah777:45eDkKiSS5ubnP6Y@cluster0.mongodb.net/cattle-management`
+**Connection string**: get it from [MongoDB Atlas](https://cloud.mongodb.com) → Connect → Drivers.
 
 ### 1.3 Test MongoDB Connection
 ```bash
