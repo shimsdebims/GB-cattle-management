@@ -1,440 +1,303 @@
 const express = require('express');
 const router = express.Router();
+
 const Expense = require('../models/Expense');
 const Revenue = require('../models/Revenue');
+const { LIMITS } = require('../constants/domain');
+const {
+  ok,
+  created,
+  paginated,
+  notFound,
+  asyncHandler,
+  parsePagination,
+  parseDateRange,
+  validationMiddleware,
+  validateIdParam,
+} = require('../middleware');
 
-// EXPENSE ROUTES
+/**
+ * An expense amount can be given directly or derived from quantity × unit cost.
+ * When both parts are present the derived value wins, so the stored amount can
+ * never contradict the line-item breakdown shown in the UI.
+ */
+function resolveAmount(body, fallback) {
+  const quantity = body.quantity !== undefined ? Number(body.quantity) : undefined;
+  const costPerUnit =
+    body.cost_per_unit !== undefined ? Number(body.cost_per_unit) : undefined;
 
-// GET /api/financial/expenses - Get all expenses
-router.get('/expenses', async (req, res) => {
-  try {
-    const { category, date_from, date_to, limit = 50, page = 1 } = req.query;
-    
-    const filter = {};
-    if (category) filter.category = new RegExp(category, 'i');
-    if (date_from || date_to) {
-      filter.date_recorded = {};
-      if (date_from) filter.date_recorded.$gte = new Date(date_from);
-      if (date_to) filter.date_recorded.$lte = new Date(date_to);
-    }
-
-    const skip = (page - 1) * limit;
-    
-    const expenses = await Expense.find(filter)
-      .sort({ date_recorded: -1 })
-      .limit(parseInt(limit))
-      .skip(skip);
-
-    const total = await Expense.countDocuments(filter);
-
-    res.json({
-      data: expenses,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / limit)
-      }
-    });
-  } catch (error) {
-    console.error('Error fetching expenses:', error);
-    res.status(500).json({ error: 'Failed to fetch expenses' });
+  if (quantity !== undefined && costPerUnit !== undefined) {
+    return quantity * costPerUnit;
   }
-});
+  if (body.amount !== undefined) return Number(body.amount);
+  return fallback;
+}
 
-// GET /api/financial/expenses/:id - Get specific expense
-router.get('/expenses/:id', async (req, res) => {
-  try {
-    const expense = await Expense.findById(req.params.id);
-    
-    if (!expense) {
-      return res.status(404).json({ error: 'Expense not found' });
-    }
+function buildListFilter(query, { enumField, value }) {
+  const filter = {};
+  if (value) filter[enumField] = value;
 
-    res.json(expense);
-  } catch (error) {
-    console.error('Error fetching expense:', error);
-    res.status(500).json({ error: 'Failed to fetch expense' });
-  }
-});
+  const dateRange = parseDateRange(query);
+  if (dateRange) filter.date_recorded = dateRange;
 
-// POST /api/financial/expenses - Create new expense
-router.post('/expenses', async (req, res) => {
-  try {
-    const { 
-      date_recorded, 
-      category, 
-      description, 
-      amount, 
-      supplier, 
-      receipt_number, 
-      notes 
-    } = req.body;
+  return filter;
+}
 
-    // Validate required fields
-    if (!date_recorded || !category || !description || !amount) {
-      return res.status(400).json({ 
-        error: 'Missing required fields: date_recorded, category, description, amount' 
-      });
-    }
+// ─── Expenses ────────────────────────────────────────────────────────────────
 
-    const expense = new Expense({
-      date_recorded: new Date(date_recorded),
-      category,
-      description,
-      amount: parseFloat(amount),
-      supplier,
-      receipt_number,
-      notes
+router.get(
+  '/expenses',
+  asyncHandler(async (req, res) => {
+    const { page, limit, skip } = parsePagination(req.query, {
+      defaultLimit: LIMITS.PAGE_SIZE_DEFAULT,
+      maxLimit: LIMITS.PAGE_SIZE_MAX,
     });
 
-    await expense.save();
-    res.status(201).json(expense);
-  } catch (error) {
-    console.error('Error creating expense:', error);
-    res.status(500).json({ error: 'Failed to create expense' });
-  }
-});
-
-// PUT /api/financial/expenses/:id - Update expense
-router.put('/expenses/:id', async (req, res) => {
-  try {
-    const { 
-      date_recorded, 
-      category, 
-      description, 
-      amount, 
-      supplier, 
-      receipt_number, 
-      notes 
-    } = req.body;
-
-    const updateData = {};
-    if (date_recorded) updateData.date_recorded = new Date(date_recorded);
-    if (category) updateData.category = category;
-    if (description) updateData.description = description;
-    if (amount !== undefined) updateData.amount = parseFloat(amount);
-    if (supplier !== undefined) updateData.supplier = supplier;
-    if (receipt_number !== undefined) updateData.receipt_number = receipt_number;
-    if (notes !== undefined) updateData.notes = notes;
-
-    const expense = await Expense.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true, runValidators: true }
-    );
-
-    if (!expense) {
-      return res.status(404).json({ error: 'Expense not found' });
-    }
-
-    res.json(expense);
-  } catch (error) {
-    console.error('Error updating expense:', error);
-    res.status(500).json({ error: 'Failed to update expense' });
-  }
-});
-
-// DELETE /api/financial/expenses/:id - Delete expense
-router.delete('/expenses/:id', async (req, res) => {
-  try {
-    const expense = await Expense.findByIdAndDelete(req.params.id);
-
-    if (!expense) {
-      return res.status(404).json({ error: 'Expense not found' });
-    }
-
-    res.json({ message: 'Expense deleted successfully' });
-  } catch (error) {
-    console.error('Error deleting expense:', error);
-    res.status(500).json({ error: 'Failed to delete expense' });
-  }
-});
-
-// REVENUE ROUTES
-
-// GET /api/financial/revenue - Get all revenue records
-router.get('/revenue', async (req, res) => {
-  try {
-    const { source, date_from, date_to, limit = 50, page = 1 } = req.query;
-    
-    const filter = {};
-    if (source) filter.source = new RegExp(source, 'i');
-    if (date_from || date_to) {
-      filter.date_recorded = {};
-      if (date_from) filter.date_recorded.$gte = new Date(date_from);
-      if (date_to) filter.date_recorded.$lte = new Date(date_to);
-    }
-
-    const skip = (page - 1) * limit;
-    
-    const revenues = await Revenue.find(filter)
-      .sort({ date_recorded: -1 })
-      .limit(parseInt(limit))
-      .skip(skip);
-
-    const total = await Revenue.countDocuments(filter);
-
-    res.json({
-      data: revenues,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / limit)
-      }
-    });
-  } catch (error) {
-    console.error('Error fetching revenue:', error);
-    res.status(500).json({ error: 'Failed to fetch revenue records' });
-  }
-});
-
-// GET /api/financial/revenue/:id - Get specific revenue record
-router.get('/revenue/:id', async (req, res) => {
-  try {
-    const revenue = await Revenue.findById(req.params.id);
-    
-    if (!revenue) {
-      return res.status(404).json({ error: 'Revenue record not found' });
-    }
-
-    res.json(revenue);
-  } catch (error) {
-    console.error('Error fetching revenue:', error);
-    res.status(500).json({ error: 'Failed to fetch revenue record' });
-  }
-});
-
-// POST /api/financial/revenue - Create new revenue record
-router.post('/revenue', async (req, res) => {
-  try {
-    const { date_recorded, source, description, amount, notes } = req.body;
-
-    // Validate required fields
-    if (!date_recorded || !source || !description || !amount) {
-      return res.status(400).json({ 
-        error: 'Missing required fields: date_recorded, source, description, amount' 
-      });
-    }
-
-    const revenue = new Revenue({
-      date_recorded: new Date(date_recorded),
-      source,
-      description,
-      amount: parseFloat(amount),
-      notes
+    const filter = buildListFilter(req.query, {
+      enumField: 'category',
+      value: req.query.category,
     });
 
-    await revenue.save();
-    res.status(201).json(revenue);
-  } catch (error) {
-    console.error('Error creating revenue:', error);
-    res.status(500).json({ error: 'Failed to create revenue record' });
-  }
-});
+    const [items, total] = await Promise.all([
+      Expense.find(filter).sort({ date_recorded: -1 }).skip(skip).limit(limit).lean(),
+      Expense.countDocuments(filter),
+    ]);
 
-// PUT /api/financial/revenue/:id - Update revenue record
-router.put('/revenue/:id', async (req, res) => {
-  try {
-    const { date_recorded, source, description, amount, notes } = req.body;
+    return paginated(res, items, { total, page, limit });
+  })
+);
 
-    const updateData = {};
-    if (date_recorded) updateData.date_recorded = new Date(date_recorded);
-    if (source) updateData.source = source;
-    if (description) updateData.description = description;
-    if (amount !== undefined) updateData.amount = parseFloat(amount);
-    if (notes !== undefined) updateData.notes = notes;
+router.get(
+  '/expenses/:id',
+  validateIdParam(),
+  asyncHandler(async (req, res) => {
+    const expense = await Expense.findById(req.params.id).lean();
+    if (!expense) throw notFound('Expense');
+    return ok(res, expense);
+  })
+);
 
-    const revenue = await Revenue.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true, runValidators: true }
-    );
+router.post(
+  '/expenses',
+  validationMiddleware('expense'),
+  asyncHandler(async (req, res) => {
+    const expense = await Expense.create({
+      ...req.body,
+      amount: resolveAmount(req.body),
+    });
+    return created(res, expense.toJSON(), 'Expense created');
+  })
+);
 
-    if (!revenue) {
-      return res.status(404).json({ error: 'Revenue record not found' });
+router.put(
+  '/expenses/:id',
+  validateIdParam(),
+  validationMiddleware('expense', { partial: true }),
+  asyncHandler(async (req, res) => {
+    const existing = await Expense.findById(req.params.id).lean();
+    if (!existing) throw notFound('Expense');
+
+    // Merge with the stored row so a partial edit still recomputes correctly.
+    const merged = { ...existing, ...req.body };
+    const update = { ...req.body, amount: resolveAmount(merged, existing.amount) };
+
+    const expense = await Expense.findByIdAndUpdate(req.params.id, update, {
+      new: true,
+      runValidators: true,
+    });
+
+    return ok(res, expense.toJSON(), 'Expense updated');
+  })
+);
+
+router.delete(
+  '/expenses/:id',
+  validateIdParam(),
+  asyncHandler(async (req, res) => {
+    const expense = await Expense.findByIdAndDelete(req.params.id).lean();
+    if (!expense) throw notFound('Expense');
+    return ok(res, { _id: req.params.id }, 'Expense deleted');
+  })
+);
+
+// ─── Revenue (non-milk only) ─────────────────────────────────────────────────
+
+router.get(
+  '/revenue',
+  asyncHandler(async (req, res) => {
+    const { page, limit, skip } = parsePagination(req.query, {
+      defaultLimit: LIMITS.PAGE_SIZE_DEFAULT,
+      maxLimit: LIMITS.PAGE_SIZE_MAX,
+    });
+
+    const filter = buildListFilter(req.query, {
+      enumField: 'source',
+      value: req.query.source,
+    });
+
+    const [items, total] = await Promise.all([
+      Revenue.find(filter).sort({ date_recorded: -1 }).skip(skip).limit(limit).lean(),
+      Revenue.countDocuments(filter),
+    ]);
+
+    return paginated(res, items, { total, page, limit });
+  })
+);
+
+router.get(
+  '/revenue/:id',
+  validateIdParam(),
+  asyncHandler(async (req, res) => {
+    const revenue = await Revenue.findById(req.params.id).lean();
+    if (!revenue) throw notFound('Revenue record');
+    return ok(res, revenue);
+  })
+);
+
+router.post(
+  '/revenue',
+  validationMiddleware('revenue'),
+  asyncHandler(async (req, res) => {
+    const revenue = await Revenue.create(req.body);
+    return created(res, revenue.toJSON(), 'Revenue created');
+  })
+);
+
+router.put(
+  '/revenue/:id',
+  validateIdParam(),
+  validationMiddleware('revenue', { partial: true }),
+  asyncHandler(async (req, res) => {
+    const revenue = await Revenue.findByIdAndUpdate(req.params.id, req.body, {
+      new: true,
+      runValidators: true,
+    });
+
+    if (!revenue) throw notFound('Revenue record');
+    return ok(res, revenue.toJSON(), 'Revenue updated');
+  })
+);
+
+router.delete(
+  '/revenue/:id',
+  validateIdParam(),
+  asyncHandler(async (req, res) => {
+    const revenue = await Revenue.findByIdAndDelete(req.params.id).lean();
+    if (!revenue) throw notFound('Revenue record');
+    return ok(res, { _id: req.params.id }, 'Revenue deleted');
+  })
+);
+
+// ─── Summary & trends ────────────────────────────────────────────────────────
+
+/**
+ * GET /api/financial/summary
+ *
+ * Accepts either an explicit `date_from`/`date_to` window or a rolling `days`
+ * count. Note this covers manual revenue only — milk income lives in
+ * /api/analytics/monthly-income because it is derived, not recorded.
+ */
+router.get(
+  '/summary',
+  asyncHandler(async (req, res) => {
+    const dateRange = parseDateRange(req.query);
+
+    let range = dateRange;
+    if (!range) {
+      const days = Math.max(1, Number.parseInt(req.query.days, 10) || 30);
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - days);
+      range = { $gte: startDate };
     }
 
-    res.json(revenue);
-  } catch (error) {
-    console.error('Error updating revenue:', error);
-    res.status(500).json({ error: 'Failed to update revenue record' });
-  }
-});
+    const match = { $match: { date_recorded: range } };
 
-// DELETE /api/financial/revenue/:id - Delete revenue record
-router.delete('/revenue/:id', async (req, res) => {
-  try {
-    const revenue = await Revenue.findByIdAndDelete(req.params.id);
-
-    if (!revenue) {
-      return res.status(404).json({ error: 'Revenue record not found' });
-    }
-
-    res.json({ message: 'Revenue record deleted successfully' });
-  } catch (error) {
-    console.error('Error deleting revenue:', error);
-    res.status(500).json({ error: 'Failed to delete revenue record' });
-  }
-});
-
-// FINANCIAL SUMMARY AND ANALYTICS
-
-// GET /api/financial/summary - Get financial summary
-router.get('/summary', async (req, res) => {
-  try {
-    const { days = 30 } = req.query;
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - parseInt(days));
-
-    // Get expense summary
-    const expenseSummary = await Expense.aggregate([
-      {
-        $match: {
-          date_recorded: { $gte: startDate }
-        }
-      },
-      {
-        $group: {
-          _id: null,
-          total_expenses: { $sum: '$amount' },
-          expense_count: { $sum: 1 }
-        }
-      }
+    const [expenseTotals, revenueTotals, byCategory, bySource] = await Promise.all([
+      Expense.aggregate([
+        match,
+        {
+          $group: {
+            _id: null,
+            total_expenses: { $sum: '$amount' },
+            expense_count: { $sum: 1 },
+          },
+        },
+      ]),
+      Revenue.aggregate([
+        match,
+        {
+          $group: {
+            _id: null,
+            total_revenue: { $sum: '$amount' },
+            revenue_count: { $sum: 1 },
+          },
+        },
+      ]),
+      Expense.aggregate([
+        match,
+        {
+          $group: { _id: '$category', total_amount: { $sum: '$amount' }, count: { $sum: 1 } },
+        },
+        { $sort: { total_amount: -1 } },
+      ]),
+      Revenue.aggregate([
+        match,
+        {
+          $group: { _id: '$source', total_amount: { $sum: '$amount' }, count: { $sum: 1 } },
+        },
+        { $sort: { total_amount: -1 } },
+      ]),
     ]);
 
-    // Get revenue summary
-    const revenueSummary = await Revenue.aggregate([
-      {
-        $match: {
-          date_recorded: { $gte: startDate }
-        }
-      },
-      {
-        $group: {
-          _id: null,
-          total_revenue: { $sum: '$amount' },
-          revenue_count: { $sum: 1 }
-        }
-      }
-    ]);
+    const total_expenses = expenseTotals[0]?.total_expenses || 0;
+    const total_revenue = revenueTotals[0]?.total_revenue || 0;
 
-    // Get expense breakdown by category
-    const expenseByCategory = await Expense.aggregate([
-      {
-        $match: {
-          date_recorded: { $gte: startDate }
-        }
-      },
-      {
-        $group: {
-          _id: '$category',
-          total_amount: { $sum: '$amount' },
-          count: { $sum: 1 }
-        }
-      },
-      {
-        $sort: { total_amount: -1 }
-      }
-    ]);
-
-    // Get revenue breakdown by source
-    const revenueBySource = await Revenue.aggregate([
-      {
-        $match: {
-          date_recorded: { $gte: startDate }
-        }
-      },
-      {
-        $group: {
-          _id: '$source',
-          total_amount: { $sum: '$amount' },
-          count: { $sum: 1 }
-        }
-      },
-      {
-        $sort: { total_amount: -1 }
-      }
-    ]);
-
-    // Calculate profit/loss
-    const totalExpenses = expenseSummary[0]?.total_expenses || 0;
-    const totalRevenue = revenueSummary[0]?.total_revenue || 0;
-    const netProfit = totalRevenue - totalExpenses;
-
-    res.json({
+    return ok(res, {
       summary: {
-        total_revenue: totalRevenue,
-        total_expenses: totalExpenses,
-        net_profit: netProfit,
-        revenue_count: revenueSummary[0]?.revenue_count || 0,
-        expense_count: expenseSummary[0]?.expense_count || 0
+        total_revenue,
+        total_expenses,
+        net_profit: total_revenue - total_expenses,
+        revenue_count: revenueTotals[0]?.revenue_count || 0,
+        expense_count: expenseTotals[0]?.expense_count || 0,
       },
-      expense_by_category: expenseByCategory,
-      revenue_by_source: revenueBySource,
-      period_days: parseInt(days)
+      expense_by_category: byCategory,
+      revenue_by_source: bySource,
     });
-  } catch (error) {
-    console.error('Error fetching financial summary:', error);
-    res.status(500).json({ error: 'Failed to fetch financial summary' });
-  }
-});
+  })
+);
 
-// GET /api/financial/trends - Get financial trends over time
-router.get('/trends', async (req, res) => {
-  try {
-    const { days = 30 } = req.query;
+router.get(
+  '/trends',
+  asyncHandler(async (req, res) => {
+    const days = Math.max(1, Number.parseInt(req.query.days, 10) || 30);
     const startDate = new Date();
-    startDate.setDate(startDate.getDate() - parseInt(days));
+    startDate.setDate(startDate.getDate() - days);
 
-    // Daily expense trends
-    const dailyExpenses = await Expense.aggregate([
-      {
-        $match: {
-          date_recorded: { $gte: startDate }
-        }
-      },
+    const groupByDay = (amountField) => [
+      { $match: { date_recorded: { $gte: startDate } } },
       {
         $group: {
-          _id: { $dateToString: { format: '%Y-%m-%d', date: '$date_recorded' } },
-          daily_expenses: { $sum: '$amount' },
-          expense_count: { $sum: 1 }
-        }
+          _id: {
+            $dateToString: { format: '%Y-%m-%d', date: '$date_recorded', timezone: 'UTC' },
+          },
+          [amountField]: { $sum: '$amount' },
+          count: { $sum: 1 },
+        },
       },
-      {
-        $sort: { _id: 1 }
-      }
+      { $sort: { _id: 1 } },
+    ];
+
+    const [dailyExpenses, dailyRevenue] = await Promise.all([
+      Expense.aggregate(groupByDay('daily_expenses')),
+      Revenue.aggregate(groupByDay('daily_revenue')),
     ]);
 
-    // Daily revenue trends
-    const dailyRevenue = await Revenue.aggregate([
-      {
-        $match: {
-          date_recorded: { $gte: startDate }
-        }
-      },
-      {
-        $group: {
-          _id: { $dateToString: { format: '%Y-%m-%d', date: '$date_recorded' } },
-          daily_revenue: { $sum: '$amount' },
-          revenue_count: { $sum: 1 }
-        }
-      },
-      {
-        $sort: { _id: 1 }
-      }
-    ]);
-
-    res.json({
+    return ok(res, {
       daily_expenses: dailyExpenses,
       daily_revenue: dailyRevenue,
-      period_days: parseInt(days)
+      period_days: days,
     });
-  } catch (error) {
-    console.error('Error fetching financial trends:', error);
-    res.status(500).json({ error: 'Failed to fetch financial trends' });
-  }
-});
+  })
+);
 
 module.exports = router;

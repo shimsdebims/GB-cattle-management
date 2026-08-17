@@ -1,434 +1,497 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TouchableOpacity,
+  ActivityIndicator,
   Alert,
-  RefreshControl,
+  FlatList,
+  KeyboardAvoidingView,
   Modal,
-  TextInput,
+  Platform,
+  RefreshControl,
   ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import { MaterialIcons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
+
+import SyncStatus from '../components/SyncStatus';
+import { ApiError } from '../services/api';
+import { offlineApi } from '../services/offlineApi';
 import { useOfflineAPI } from '../hooks/useOfflineAPI';
-import { MilkProduction, Cattle } from '../types';
+import { formatLiters } from '../utils/formatCurrency';
+import { formatDate, todayDateOnly } from '../utils/date';
+import { colors, radius, spacing } from '../constants/theme';
+import { LIMITS, cattleIdOf, type Cattle, type MilkProduction } from '../types';
 
 const MilkProductionScreen = () => {
-  const [milkRecords, setMilkRecords] = useState<MilkProduction[]>([]);
-  const [cattle, setCattle] = useState<Cattle[]>([]);
+  const { isOnline, forceSync } = useOfflineAPI();
+
+  const [records, setRecords] = useState<MilkProduction[]>([]);
+  const [herd, setHerd] = useState<Cattle[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  
-  const { getMilkProduction, getCattle, createMilkProduction, forceSync } = useOfflineAPI();
 
-  const [formData, setFormData] = useState({
-    cattle_id: '',
-    date_recorded: new Date().toISOString(),
-    quantity_liters: 0,
-    quality_score: 8,
-    notes: '',
-  });
+  const [showModal, setShowModal] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const fetchData = async () => {
+  const [cattleId, setCattleId] = useState('');
+  const [quantity, setQuantity] = useState('');
+  const [quality, setQuality] = useState('');
+  const [notes, setNotes] = useState('');
+  const [date, setDate] = useState(todayDateOnly());
+
+  const load = useCallback(async () => {
     try {
-      const [milkData, cattleData] = await Promise.all([
-        getMilkProduction(),
-        getCattle()
+      const [milk, cattle] = await Promise.all([
+        offlineApi.getMilk(),
+        offlineApi.getCattle(),
       ]);
-      setMilkRecords(milkData);
-      setCattle(cattleData);
-    } catch (error) {
-      console.error('Error fetching data:', error);
-      Alert.alert('Error', 'Failed to load data');
+      setRecords(milk);
+      setHerd(cattle);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  };
-
-  useEffect(() => {
-    fetchData();
   }, []);
 
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await forceSync();
-    await fetchData();
-  };
-
-  const handleAddRecord = async () => {
-    if (!formData.cattle_id) {
-      Alert.alert('Error', 'Please select a cattle');
-      return;
-    }
-    if (formData.quantity_liters <= 0) {
-      Alert.alert('Error', 'Please enter a valid quantity');
-      return;
-    }
-
-    try {
-      await createMilkProduction(formData);
-      setShowAddModal(false);
-      setFormData({
-        cattle_id: '',
-        date_recorded: new Date().toISOString(),
-        quantity_liters: 0,
-        quality_score: 8,
-        notes: '',
-      });
-      await fetchData();
-      Alert.alert('Success', 'Milk production record added');
-    } catch (error) {
-      console.error('Error adding record:', error);
-      Alert.alert('Error', 'Failed to add record. Saved offline.');
-    }
-  };
-
-  const getCattleName = (cattleId: string) => {
-    const cattleItem = cattle.find(c => c._id === cattleId);
-    return cattleItem ? `${cattleItem.tag_number} - ${cattleItem.name}` : 'Unknown';
-  };
-
-  const renderMilkRecord = ({ item }: { item: MilkProduction }) => (
-    <View style={styles.recordCard}>
-      <View style={styles.recordHeader}>
-        <Text style={styles.cattleName}>{getCattleName(item.cattle_id)}</Text>
-        <Text style={styles.date}>
-          {new Date(item.date_recorded).toLocaleDateString()}
-        </Text>
-      </View>
-      <View style={styles.recordDetails}>
-        <View style={styles.detailItem}>
-          <MaterialIcons name="opacity" size={16} color="#4CAF50" />
-          <Text style={styles.detailText}>{item.quantity_liters.toFixed(1)} L</Text>
-        </View>
-        {item.quality_score && (
-          <View style={styles.detailItem}>
-            <MaterialIcons name="star" size={16} color="#FFD700" />
-            <Text style={styles.detailText}>{item.quality_score.toFixed(1)}/10</Text>
-          </View>
-        )}
-      </View>
-      {item.notes && (
-        <Text style={styles.notes}>{item.notes}</Text>
-      )}
-    </View>
+  useFocusEffect(
+    useCallback(() => {
+      void load();
+    }, [load])
   );
 
-  const onDateChange = (event: any, selectedDate?: Date) => {
-    setShowDatePicker(false);
-    if (selectedDate) {
-      setFormData({ ...formData, date_recorded: selectedDate.toISOString() });
+  /** Only active females are milked. */
+  const milkingHerd = useMemo(
+    () => herd.filter((cow) => cow.current_status === 'Active' && cow.gender === 'Female'),
+    [herd]
+  );
+
+  const nameFor = useCallback(
+    (ref: MilkProduction['cattle_id']) => {
+      if (typeof ref !== 'string') return `${ref.tag_number} — ${ref.name}`;
+      const cow = herd.find((c) => c._id === ref);
+      return cow ? `${cow.tag_number} — ${cow.name}` : 'Unknown';
+    },
+    [herd]
+  );
+
+  const totalLiters = useMemo(
+    () => records.reduce((sum, record) => sum + record.quantity_liters, 0),
+    [records]
+  );
+
+  /** Warn before submitting a day that already has a record for this cow. */
+  const duplicateWarning = useMemo(() => {
+    if (!cattleId) return null;
+    const clash = records.find(
+      (record) =>
+        cattleIdOf(record.cattle_id) === cattleId &&
+        record.date_recorded.slice(0, 10) === date
+    );
+    return clash
+      ? `A record already exists for this cow on ${formatDate(date)}.`
+      : null;
+  }, [records, cattleId, date]);
+
+  const resetForm = () => {
+    setCattleId('');
+    setQuantity('');
+    setQuality('');
+    setNotes('');
+    setDate(todayDateOnly());
+  };
+
+  const handleSave = async () => {
+    const litres = parseFloat(quantity);
+
+    if (!cattleId) return Alert.alert('Validation', 'Select a cow.');
+    if (Number.isNaN(litres) || litres <= 0) {
+      return Alert.alert('Validation', 'Enter a quantity greater than zero.');
+    }
+    if (litres > LIMITS.MILK_QUANTITY_MAX) {
+      return Alert.alert(
+        'Validation',
+        `Quantity must not exceed ${LIMITS.MILK_QUANTITY_MAX} litres.`
+      );
+    }
+
+    const score = quality ? parseFloat(quality) : undefined;
+    if (
+      score !== undefined &&
+      (Number.isNaN(score) ||
+        score < LIMITS.QUALITY_SCORE_MIN ||
+        score > LIMITS.QUALITY_SCORE_MAX)
+    ) {
+      return Alert.alert(
+        'Validation',
+        `Quality must be between ${LIMITS.QUALITY_SCORE_MIN} and ${LIMITS.QUALITY_SCORE_MAX}.`
+      );
+    }
+
+    setSaving(true);
+    try {
+      await offlineApi.createMilk({
+        cattle_id: cattleId,
+        date_recorded: date,
+        quantity_liters: litres,
+        quality_score: score,
+        notes: notes.trim() || undefined,
+      });
+      setShowModal(false);
+      resetForm();
+      await load();
+    } catch (error) {
+      Alert.alert(
+        'Could not save',
+        error instanceof ApiError ? error.displayMessage : 'Please try again.'
+      );
+    } finally {
+      setSaving(false);
     }
   };
+
+  const confirmDelete = (record: MilkProduction) => {
+    Alert.alert('Delete milk record?', 'This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          await offlineApi.deleteMilk(record._id);
+          await load();
+        },
+      },
+    ]);
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Milk Production</Text>
-        <TouchableOpacity 
+        <View style={styles.headerText}>
+          <Text style={styles.title}>Milk Production</Text>
+          <Text style={styles.subtitle}>
+            {records.length} records · {formatLiters(totalLiters)}
+          </Text>
+        </View>
+        <SyncStatus />
+        <TouchableOpacity
           style={styles.addButton}
-          onPress={() => setShowAddModal(true)}
+          onPress={() => setShowModal(true)}
+          accessibilityLabel="Add milk record"
         >
-          <MaterialIcons name="add" size={24} color="#FFFFFF" />
+          <MaterialIcons name="add" size={24} color={colors.background} />
         </TouchableOpacity>
       </View>
 
       <FlatList
-        data={milkRecords}
-        renderItem={renderMilkRecord}
+        data={records}
         keyExtractor={(item) => item._id}
-        style={styles.list}
+        contentContainerStyle={styles.list}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={async () => {
+              setRefreshing(true);
+              await forceSync();
+              await load();
+            }}
+          />
         }
         ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <MaterialIcons name="opacity" size={64} color="#666" />
-            <Text style={styles.emptyText}>No milk production records</Text>
-            <Text style={styles.emptySubtext}>Tap + to add your first record</Text>
+          <View style={styles.empty}>
+            <MaterialIcons name="opacity" size={52} color={colors.borderStrong} />
+            <Text style={styles.emptyText}>No milk records yet</Text>
+            <Text style={styles.emptyHint}>Tap + to record today's yield.</Text>
           </View>
         }
+        renderItem={({ item }) => (
+          <TouchableOpacity
+            style={styles.card}
+            onLongPress={() => confirmDelete(item)}
+            delayLongPress={400}
+          >
+            <View style={styles.cardTop}>
+              <Text style={styles.cardTitle} numberOfLines={1}>
+                {nameFor(item.cattle_id)}
+              </Text>
+              <Text style={styles.cardDate}>{formatDate(item.date_recorded)}</Text>
+            </View>
+            <View style={styles.cardBottom}>
+              <View style={styles.metric}>
+                <MaterialIcons name="opacity" size={16} color={colors.cyan} />
+                <Text style={styles.metricText}>{formatLiters(item.quantity_liters)}</Text>
+              </View>
+              {item.quality_score != null && (
+                <View style={styles.metric}>
+                  <MaterialIcons name="star" size={16} color="#FFD700" />
+                  <Text style={styles.metricText}>
+                    {item.quality_score.toFixed(1)}/{LIMITS.QUALITY_SCORE_MAX}
+                  </Text>
+                </View>
+              )}
+            </View>
+            {item.notes ? <Text style={styles.notes}>{item.notes}</Text> : null}
+          </TouchableOpacity>
+        )}
       />
 
-      {/* Add Record Modal */}
-      <Modal
-        visible={showAddModal}
-        animationType="slide"
-        presentationStyle="pageSheet"
-      >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={() => setShowAddModal(false)}>
-              <MaterialIcons name="close" size={24} color="#FFFFFF" />
-            </TouchableOpacity>
-            <Text style={styles.modalTitle}>Add Milk Record</Text>
-            <TouchableOpacity onPress={handleAddRecord}>
-              <Text style={styles.saveButton}>Save</Text>
-            </TouchableOpacity>
-          </View>
+      <Modal visible={showModal} animationType="slide" transparent>
+        <KeyboardAvoidingView
+          style={styles.overlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <View style={styles.sheet}>
+            <Text style={styles.sheetTitle}>Add Milk Record</Text>
 
-          <ScrollView style={styles.modalContent}>
-            {/* Cattle Selection */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Select Cattle *</Text>
-              <View style={styles.pickerContainer}>
-                <Picker
-                  selectedValue={formData.cattle_id}
-                  onValueChange={(value) => setFormData({ ...formData, cattle_id: value })}
-                  style={styles.picker}
-                >
-                  <Picker.Item label="Select Cattle" value="" />
-                  {cattle.filter(c => c.current_status === 'Active' && c.gender === 'Female').map((cattleItem) => (
-                    <Picker.Item 
-                      key={cattleItem._id} 
-                      label={`${cattleItem.tag_number} - ${cattleItem.name}`} 
-                      value={cattleItem._id} 
-                    />
-                  ))}
-                </Picker>
-              </View>
-            </View>
-
-            {/* Date */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Date</Text>
-              <TouchableOpacity 
-                style={styles.dateButton}
-                onPress={() => setShowDatePicker(true)}
-              >
-                <Text style={styles.dateText}>
-                  {new Date(formData.date_recorded).toLocaleDateString()}
+            <ScrollView keyboardShouldPersistTaps="handled">
+              <Text style={styles.label}>Cow *</Text>
+              {milkingHerd.length === 0 ? (
+                <Text style={styles.hint}>
+                  No active female cattle. Add one on the Cattle tab first.
                 </Text>
-                <MaterialIcons name="calendar-today" size={20} color="#4CAF50" />
-              </TouchableOpacity>
-            </View>
+              ) : (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  <View style={styles.chipRow}>
+                    {milkingHerd.map((cow) => (
+                      <TouchableOpacity
+                        key={cow._id}
+                        style={[styles.chip, cattleId === cow._id && styles.chipActive]}
+                        onPress={() => setCattleId(cow._id)}
+                      >
+                        <Text
+                          style={[
+                            styles.chipText,
+                            cattleId === cow._id && styles.chipTextActive,
+                          ]}
+                        >
+                          {cow.tag_number}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </ScrollView>
+              )}
 
-            {/* Quantity */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Quantity (Liters) *</Text>
+              <Text style={styles.label}>Date</Text>
               <TextInput
                 style={styles.input}
-                value={formData.quantity_liters.toString()}
-                onChangeText={(text) => setFormData({ ...formData, quantity_liters: parseFloat(text) || 0 })}
-                placeholder="e.g., 25.5"
-                placeholderTextColor="#666"
-                keyboardType="numeric"
+                value={date}
+                onChangeText={setDate}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor={colors.textDisabled}
               />
-            </View>
 
-            {/* Quality Score */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Quality Score (1-10)</Text>
-              <TextInput
-                style={styles.input}
-                value={formData.quality_score.toString()}
-                onChangeText={(text) => setFormData({ ...formData, quality_score: parseFloat(text) || 0 })}
-                placeholder="e.g., 8.5"
-                placeholderTextColor="#666"
-                keyboardType="numeric"
-              />
-            </View>
+              {duplicateWarning && (
+                <Text style={styles.warning}>
+                  <MaterialIcons name="warning" size={12} /> {duplicateWarning}
+                </Text>
+              )}
 
-            {/* Notes */}
-            <View style={styles.inputGroup}>
+              <View style={styles.fieldRow}>
+                <View style={styles.field}>
+                  <Text style={styles.label}>Litres *</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={quantity}
+                    onChangeText={setQuantity}
+                    keyboardType="numeric"
+                    placeholder="e.g. 25.5"
+                    placeholderTextColor={colors.textDisabled}
+                  />
+                </View>
+                <View style={styles.field}>
+                  <Text style={styles.label}>
+                    Quality ({LIMITS.QUALITY_SCORE_MIN}–{LIMITS.QUALITY_SCORE_MAX})
+                  </Text>
+                  <TextInput
+                    style={styles.input}
+                    value={quality}
+                    onChangeText={setQuality}
+                    keyboardType="numeric"
+                    placeholder="Optional"
+                    placeholderTextColor={colors.textDisabled}
+                  />
+                </View>
+              </View>
+
               <Text style={styles.label}>Notes</Text>
               <TextInput
                 style={[styles.input, styles.textArea]}
-                value={formData.notes}
-                onChangeText={(text) => setFormData({ ...formData, notes: text })}
-                placeholder="Additional notes..."
-                placeholderTextColor="#666"
+                value={notes}
+                onChangeText={setNotes}
+                placeholder="Optional"
+                placeholderTextColor={colors.textDisabled}
                 multiline
-                numberOfLines={3}
               />
-            </View>
-          </ScrollView>
 
-          {/* Date Picker */}
-          {showDatePicker && (
-            <DateTimePicker
-              value={new Date(formData.date_recorded)}
-              mode="date"
-              display="default"
-              onChange={onDateChange}
-              maximumDate={new Date()}
-            />
-          )}
-        </View>
+              {!isOnline && (
+                <Text style={styles.offlineNote}>
+                  You are offline — this will be saved locally and synced later.
+                </Text>
+              )}
+            </ScrollView>
+
+            <View style={styles.sheetActions}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => {
+                  setShowModal(false);
+                  resetForm();
+                }}
+              >
+                <Text style={styles.cancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.saveButton, saving && styles.disabled]}
+                onPress={handleSave}
+                disabled={saving}
+              >
+                {saving ? (
+                  <ActivityIndicator size="small" color={colors.background} />
+                ) : (
+                  <Text style={styles.saveText}>Save</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
+  container: { flex: 1, backgroundColor: colors.background },
+  centered: {
     flex: 1,
-    backgroundColor: '#0A1A23',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.background,
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
-    paddingTop: 60,
+    gap: spacing.sm,
+    paddingHorizontal: spacing.xl,
+    paddingTop: 56,
+    paddingBottom: spacing.md,
   },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
+  headerText: { flex: 1 },
+  title: { fontSize: 22, fontWeight: 'bold', color: colors.text },
+  subtitle: { fontSize: 13, color: colors.textMuted, marginTop: 2 },
   addButton: {
-    backgroundColor: '#4CAF50',
-    borderRadius: 20,
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.primary,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  list: {
-    flex: 1,
-    padding: 20,
-  },
-  recordCard: {
-    backgroundColor: '#1E2A35',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+  list: { paddingHorizontal: spacing.xl, paddingBottom: spacing.xxl },
+
+  card: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
     borderWidth: 1,
-    borderColor: '#2A3A47',
+    borderColor: colors.border,
   },
-  recordHeader: {
+  cardTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: spacing.sm,
   },
-  cattleName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    flex: 1,
-  },
-  date: {
-    fontSize: 14,
-    color: '#C1C7CD',
-  },
-  recordDetails: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  detailItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginRight: 20,
-  },
-  detailText: {
-    fontSize: 14,
-    color: '#C1C7CD',
-    marginLeft: 4,
-  },
+  cardTitle: { color: colors.text, fontSize: 15, fontWeight: '600', flex: 1 },
+  cardDate: { color: colors.textFaint, fontSize: 12 },
+  cardBottom: { flexDirection: 'row', gap: spacing.xl },
+  metric: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  metricText: { color: colors.textMuted, fontSize: 13 },
   notes: {
-    fontSize: 14,
-    color: '#C1C7CD',
+    color: colors.textFaint,
+    fontSize: 12,
     fontStyle: 'italic',
+    marginTop: spacing.sm,
   },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingTop: 100,
+
+  empty: { alignItems: 'center', paddingTop: 80, gap: spacing.sm },
+  emptyText: { color: colors.textMuted, fontSize: 16 },
+  emptyHint: { color: colors.textDisabled, fontSize: 13 },
+
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  sheet: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: spacing.xl,
+    borderTopRightRadius: spacing.xl,
+    padding: spacing.xl,
+    maxHeight: '90%',
   },
-  emptyText: {
-    fontSize: 18,
-    color: '#C1C7CD',
-    marginTop: 16,
-  },
-  emptySubtext: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 8,
-  },
-  modalContainer: {
-    flex: 1,
-    backgroundColor: '#0A1A23',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    paddingTop: 60,
-    borderBottomWidth: 1,
-    borderBottomColor: '#2A3A47',
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-  saveButton: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#4CAF50',
-  },
-  modalContent: {
-    flex: 1,
-    padding: 20,
-  },
-  inputGroup: {
-    marginBottom: 20,
-  },
+  sheetTitle: { fontSize: 18, fontWeight: '700', color: colors.text },
   label: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    marginBottom: 8,
+    color: colors.textMuted,
+    fontSize: 13,
+    marginTop: spacing.md,
+    marginBottom: spacing.xs,
   },
+  hint: { color: colors.textDisabled, fontSize: 13, fontStyle: 'italic' },
+  warning: { color: colors.warning, fontSize: 12, marginTop: spacing.sm },
   input: {
-    backgroundColor: '#1E2A35',
-    borderRadius: 8,
-    padding: 15,
-    fontSize: 16,
-    color: '#FFFFFF',
+    backgroundColor: colors.background,
+    borderRadius: radius.sm,
     borderWidth: 1,
-    borderColor: '#2A3A47',
+    borderColor: colors.borderStrong,
+    color: colors.text,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    fontSize: 15,
   },
-  textArea: {
-    height: 80,
-    textAlignVertical: 'top',
-  },
-  pickerContainer: {
-    backgroundColor: '#1E2A35',
-    borderRadius: 8,
+  textArea: { height: 70, textAlignVertical: 'top' },
+  fieldRow: { flexDirection: 'row', gap: spacing.md },
+  field: { flex: 1 },
+  chipRow: { flexDirection: 'row', gap: spacing.sm, paddingVertical: spacing.xs },
+  chip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.pill,
     borderWidth: 1,
-    borderColor: '#2A3A47',
+    borderColor: colors.borderStrong,
   },
-  picker: {
-    color: '#FFFFFF',
-    height: 50,
-  },
-  dateButton: {
-    backgroundColor: '#1E2A35',
-    borderRadius: 8,
-    padding: 15,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  chipActive: { backgroundColor: colors.header, borderColor: colors.primary },
+  chipText: { color: colors.textMuted, fontSize: 13 },
+  chipTextActive: { color: colors.primary, fontWeight: '700' },
+  offlineNote: { color: colors.warning, fontSize: 12, marginTop: spacing.md },
+
+  sheetActions: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.lg },
+  cancelButton: {
+    flex: 1,
     alignItems: 'center',
+    paddingVertical: spacing.lg,
+    borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: '#2A3A47',
+    borderColor: colors.borderStrong,
   },
-  dateText: {
-    fontSize: 16,
-    color: '#FFFFFF',
+  cancelText: { color: colors.textMuted, fontSize: 15 },
+  saveButton: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: spacing.lg,
+    borderRadius: radius.md,
+    backgroundColor: colors.primary,
   },
+  saveText: { color: colors.background, fontSize: 15, fontWeight: '700' },
+  disabled: { opacity: 0.6 },
 });
 
 export default MilkProductionScreen;

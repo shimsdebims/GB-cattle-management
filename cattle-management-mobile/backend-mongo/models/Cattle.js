@@ -1,39 +1,55 @@
 const mongoose = require('mongoose');
+const {
+  BREEDS,
+  GENDERS,
+  HEALTH_STATUSES,
+  CATTLE_STATUSES,
+  LIMITS,
+} = require('../constants/domain');
 
 const cattleSchema = new mongoose.Schema({
   tag_number: {
     type: String,
     required: true,
     unique: true,
-    trim: true
+    trim: true,
+    uppercase: true,
+    minlength: LIMITS.TAG_NUMBER_MIN,
+    maxlength: LIMITS.TAG_NUMBER_MAX,
   },
   name: {
     type: String,
     required: true,
-    trim: true
+    trim: true,
+    maxlength: LIMITS.NAME_MAX,
   },
   breed: {
     type: String,
     required: true,
-    enum: ['Holstein', 'Jersey', 'Angus', 'Hereford', 'Brahman', 'Simmental', 'Charolais', 'Other']
+    enum: BREEDS,
   },
   date_of_birth: {
     type: Date,
-    required: true
+    required: true,
+    validate: {
+      validator: (value) => value <= new Date(),
+      message: 'Date of birth cannot be in the future',
+    },
   },
   gender: {
     type: String,
     required: true,
-    enum: ['Male', 'Female']
+    enum: GENDERS,
   },
   weight: {
     type: Number,
-    min: 0
+    min: 0,
+    max: LIMITS.CATTLE_WEIGHT_MAX,
   },
   health_status: {
     type: String,
     default: 'Healthy',
-    enum: ['Healthy', 'Sick', 'Injured', 'Pregnant', 'Recovering']
+    enum: HEALTH_STATUSES,
   },
   location: {
     type: String,
@@ -49,19 +65,21 @@ const cattleSchema = new mongoose.Schema({
   current_status: {
     type: String,
     default: 'Active',
-    enum: ['Active', 'Sold', 'Deceased', 'Quarantined']
+    enum: CATTLE_STATUSES,
   },
   notes: {
     type: String,
-    trim: true
+    trim: true,
+    maxlength: LIMITS.NOTES_MAX,
   }
 }, {
   timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' }
 });
 
-// Indexes for better query performance
-cattleSchema.index({ tag_number: 1 });
-cattleSchema.index({ current_status: 1 });
+// NOTE: `tag_number` is already indexed by `unique: true` above; re-declaring it
+// would create a duplicate index.
+// Compound index serves the default list query (filter by status, newest first).
+cattleSchema.index({ current_status: 1, created_at: -1 });
 cattleSchema.index({ health_status: 1 });
 cattleSchema.index({ breed: 1 });
 

@@ -15,19 +15,22 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.cattlemanagement.app"
+      "bundleIdentifier": "com.shims.gbcattle"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0A1A23"
       },
-      "package": "com.cattlemanagement.app",
+      "package": "com.shims.gbcattle",
       "edgeToEdgeEnabled": true
     },
     "web": {
       "favicon": "./assets/favicon.png",
       "bundler": "metro"
+    },
+    "extra": {
+      "apiUrl": null
     }
   }
 }

@@ -1,8 +1,10 @@
 import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, NavigatorScreenParams } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import { MaterialIcons } from '@expo/vector-icons';
+
+import { colors } from '../constants/theme';
 
 // Import screens
 import DashboardScreen from '../screens/DashboardScreen';
@@ -13,13 +15,8 @@ import MilkProductionScreen from '../screens/MilkProductionScreen';
 import FeedingScreen from '../screens/FeedingScreen';
 import FinancialScreen from '../screens/FinancialScreen';
 import AnalyticsScreen from '../screens/AnalyticsScreen';
-
-export type RootStackParamList = {
-  MainTabs: undefined;
-  CattleDetail: { cattleId: string };
-  AddCattle: undefined;
-  EditCattle: { cattleId: string };
-};
+import MonthlyReportScreen from '../screens/MonthlyReportScreen';
+import SettingsScreen from '../screens/SettingsScreen';
 
 export type MainTabParamList = {
   Dashboard: undefined;
@@ -27,7 +24,19 @@ export type MainTabParamList = {
   Milk: undefined;
   Feeding: undefined;
   Financial: undefined;
+  Monthly: undefined;
   Analytics: undefined;
+};
+
+/**
+ * `MainTabs` is typed as nested navigator params so screens can jump straight
+ * to a tab, e.g. navigate('MainTabs', { screen: 'Feeding' }).
+ */
+export type RootStackParamList = {
+  MainTabs: NavigatorScreenParams<MainTabParamList> | undefined;
+  CattleDetail: { cattleId: string };
+  AddCattle: undefined;
+  Settings: undefined;
 };
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -50,6 +59,8 @@ const MainTabs = () => {
             iconName = 'restaurant';
           } else if (route.name === 'Financial') {
             iconName = 'attach-money';
+          } else if (route.name === 'Monthly') {
+            iconName = 'table-chart';
           } else if (route.name === 'Analytics') {
             iconName = 'analytics';
           } else {
@@ -58,16 +69,17 @@ const MainTabs = () => {
 
           return <MaterialIcons name={iconName} size={size} color={color} />;
         },
-        tabBarActiveTintColor: '#00ED64',
-        tabBarInactiveTintColor: '#C1C7CD',
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.textMuted,
         tabBarStyle: {
-          backgroundColor: '#00374A',
-          borderTopColor: '#394F56',
+          backgroundColor: colors.header,
+          borderTopColor: colors.borderStrong,
         },
+        headerShown: false,
         headerStyle: {
-          backgroundColor: '#00374A',
+          backgroundColor: colors.header,
         },
-        headerTintColor: '#FFFFFF',
+        headerTintColor: colors.text,
         headerTitleStyle: {
           fontWeight: 'bold',
         },
@@ -78,6 +90,7 @@ const MainTabs = () => {
       <Tab.Screen name="Milk" component={MilkProductionScreen} />
       <Tab.Screen name="Feeding" component={FeedingScreen} />
       <Tab.Screen name="Financial" component={FinancialScreen} />
+      <Tab.Screen name="Monthly" component={MonthlyReportScreen} options={{ title: 'Monthly Report' }} />
       <Tab.Screen name="Analytics" component={AnalyticsScreen} />
     </Tab.Navigator>
   );
@@ -89,9 +102,9 @@ const AppNavigator = () => {
       <Stack.Navigator
         screenOptions={{
           headerStyle: {
-            backgroundColor: '#00374A',
+            backgroundColor: colors.header,
           },
-          headerTintColor: '#FFFFFF',
+          headerTintColor: colors.text,
           headerTitleStyle: {
             fontWeight: 'bold',
           },
@@ -111,6 +124,11 @@ const AppNavigator = () => {
           name="AddCattle"
           component={AddCattleScreen}
           options={{ title: 'Add New Cattle' }}
+        />
+        <Stack.Screen
+          name="Settings"
+          component={SettingsScreen}
+          options={{ title: 'Farm Settings' }}
         />
       </Stack.Navigator>
     </NavigationContainer>

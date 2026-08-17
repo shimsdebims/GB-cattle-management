@@ -1,49 +1,39 @@
-import { useState, useEffect } from 'react';
-import { offlineAPI } from '../services/offlineApi';
-import { Cattle, MilkProduction, Feeding, Expense, CattleFormData } from '../types';
+import { useCallback, useEffect, useState } from 'react';
 
-export const useOfflineAPI = () => {
-  const [isOnline, setIsOnline] = useState(true);
-  const [syncStatus, setSyncStatus] = useState({ pendingCount: 0, lastSync: null as Date | null });
+import { offlineApi } from '../services/offlineApi';
+import {
+  SyncState,
+  getSyncState,
+  subscribeToSyncState,
+} from '../services/offlineStore';
 
-  useEffect(() => {
-    updateSyncStatus();
+/**
+ * Subscribes to the single shared sync state.
+ *
+ * Every consumer sees the same values; previously each call site kept its own
+ * copy and reported `isOnline: true` unconditionally.
+ */
+export function useSyncState(): SyncState {
+  const [state, setState] = useState<SyncState>(getSyncState);
+
+  useEffect(() => subscribeToSyncState(setState), []);
+
+  return state;
+}
+
+/** Offline-aware data access plus live sync status. */
+export function useOfflineAPI() {
+  const syncState = useSyncState();
+
+  const forceSync = useCallback(async () => {
+    await offlineApi.synchronize();
   }, []);
 
-  const updateSyncStatus = async () => {
-    const status = await offlineAPI.getSyncStatus();
-    setSyncStatus(status);
-  };
-
-  const forceSync = async () => {
-    await offlineAPI.forceSync();
-    await updateSyncStatus();
-  };
-
   return {
-    isOnline,
-    syncStatus,
+    ...syncState,
+    api: offlineApi,
     forceSync,
-    updateSyncStatus,
-    
-    // Cattle methods
-    getCattle: () => offlineAPI.getCattle(),
-    createCattle: (data: CattleFormData) => offlineAPI.createCattle(data),
-    updateCattle: (id: string, data: Partial<CattleFormData>) => offlineAPI.updateCattle(id, data),
-    deleteCattle: (id: string) => offlineAPI.deleteCattle(id),
-    
-    // Milk methods
-    getMilkProduction: () => offlineAPI.getMilkProduction(),
-    createMilkProduction: (data: Partial<MilkProduction>) => offlineAPI.createMilkProduction(data),
-    
-    // Feeding methods
-    getFeeding: () => offlineAPI.getFeeding(),
-    createFeeding: (data: Partial<Feeding>) => offlineAPI.createFeeding(data),
-    
-    // Financial methods
-    getExpenses: () => offlineAPI.getExpenses(),
-    createExpense: (data: Partial<Expense>) => offlineAPI.createExpense(data),
   };
-};
+}
 
 export default useOfflineAPI;

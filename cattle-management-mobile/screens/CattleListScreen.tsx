@@ -1,325 +1,349 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
+  ActivityIndicator,
   FlatList,
-  TouchableOpacity,
-  Alert,
   RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { useOfflineAPI } from '../hooks/useOfflineAPI';
-import { Cattle } from '../types';
-import { RootStackParamList } from '../navigation/AppNavigator';
 
-type NavigationProp = StackNavigationProp<RootStackParamList>;
+import SyncStatus from '../components/SyncStatus';
+import { offlineApi } from '../services/offlineApi';
+import { useOfflineAPI } from '../hooks/useOfflineAPI';
+import { colors, healthColor, radius, spacing, statusColor } from '../constants/theme';
+import { CATTLE_STATUSES, type Cattle, type CattleStatus } from '../types';
+import type { RootStackParamList } from '../navigation/AppNavigator';
+
+type Nav = StackNavigationProp<RootStackParamList>;
 
 const CattleListScreen = () => {
-  const [cattle, setCattle] = useState<Cattle[]>([]);
+  const navigation = useNavigation<Nav>();
+  const { forceSync } = useOfflineAPI();
+
+  const [herd, setHerd] = useState<Cattle[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const navigation = useNavigation<NavigationProp>();
-  const { getCattle, syncStatus, forceSync } = useOfflineAPI();
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<CattleStatus | 'All'>('All');
 
-  const fetchCattle = async () => {
+  const load = useCallback(async () => {
     try {
-      const cattleData = await getCattle();
-      setCattle(cattleData);
-    } catch (error) {
-      console.error('Error fetching cattle:', error);
-      Alert.alert('Error', 'Failed to load cattle data');
+      setHerd(await offlineApi.getCattle());
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  };
-
-  useEffect(() => {
-    fetchCattle();
   }, []);
 
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await forceSync();
-    await fetchCattle();
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'Active': return '#4CAF50';
-      case 'Sold': return '#2196F3';
-      case 'Deceased': return '#F44336';
-      case 'Quarantined': return '#FF9800';
-      default: return '#C1C7CD';
-    }
-  };
-
-  const getHealthColor = (health: string) => {
-    switch (health) {
-      case 'Healthy': return '#4CAF50';
-      case 'Sick': return '#F44336';
-      case 'Injured': return '#FF9800';
-      case 'Pregnant': return '#2196F3';
-      case 'Recovering': return '#9C27B0';
-      default: return '#C1C7CD';
-    }
-  };
-
-  const calculateAge = (birthDate: string) => {
-    const birth = new Date(birthDate);
-    const today = new Date();
-    const ageInMonths = (today.getFullYear() - birth.getFullYear()) * 12 + 
-                       (today.getMonth() - birth.getMonth());
-    
-    if (ageInMonths < 12) {
-      return `${ageInMonths} months`;
-    } else {
-      const years = Math.floor(ageInMonths / 12);
-      const months = ageInMonths % 12;
-      return months > 0 ? `${years}y ${months}m` : `${years} years`;
-    }
-  };
-
-  const renderCattleItem = ({ item }: { item: Cattle }) => (
-    <TouchableOpacity
-      style={styles.cattleCard}
-      onPress={() => navigation.navigate('CattleDetail', { cattleId: item._id })}
-    >
-      <View style={styles.cardHeader}>
-        <View style={styles.nameSection}>
-          <Text style={styles.cattleName}>{item.name}</Text>
-          <Text style={styles.tagNumber}>{item.tag_number}</Text>
-        </View>
-        <View style={styles.statusBadges}>
-          <View style={[styles.badge, { backgroundColor: getStatusColor(item.current_status) }]}>
-            <Text style={styles.badgeText}>{item.current_status}</Text>
-          </View>
-        </View>
-      </View>
-
-      <View style={styles.cardContent}>
-        <View style={styles.infoRow}>
-          <MaterialIcons name="pets" size={16} color="#C1C7CD" />
-          <Text style={styles.infoText}>{item.breed}</Text>
-        </View>
-        
-        <View style={styles.infoRow}>
-          <MaterialIcons name="wc" size={16} color="#C1C7CD" />
-          <Text style={styles.infoText}>{item.gender}</Text>
-        </View>
-
-        <View style={styles.infoRow}>
-          <MaterialIcons name="cake" size={16} color="#C1C7CD" />
-          <Text style={styles.infoText}>{calculateAge(item.date_of_birth)}</Text>
-        </View>
-
-        {item.weight && (
-          <View style={styles.infoRow}>
-            <MaterialIcons name="fitness-center" size={16} color="#C1C7CD" />
-            <Text style={styles.infoText}>{item.weight.toFixed(0)} kg</Text>
-          </View>
-        )}
-
-        {item.location && (
-          <View style={styles.infoRow}>
-            <MaterialIcons name="location-on" size={16} color="#C1C7CD" />
-            <Text style={styles.infoText}>{item.location}</Text>
-          </View>
-        )}
-      </View>
-
-      <View style={styles.cardFooter}>
-        <View style={styles.healthSection}>
-          <View style={[styles.healthBadge, { backgroundColor: getHealthColor(item.health_status) }]}>
-            <MaterialIcons name="favorite" size={12} color="#FFFFFF" />
-            <Text style={styles.healthText}>{item.health_status}</Text>
-          </View>
-        </View>
-        
-        <TouchableOpacity style={styles.detailsButton}>
-          <MaterialIcons name="arrow-forward-ios" size={16} color="#00ED64" />
-        </TouchableOpacity>
-      </View>
-    </TouchableOpacity>
+  // Reload on focus so a newly added animal appears without a manual pull.
+  useFocusEffect(
+    useCallback(() => {
+      void load();
+    }, [load])
   );
 
-  const renderHeader = () => (
-    <View style={styles.header}>
-      <View style={styles.headerContent}>
-        <Text style={styles.title}>My Cattle</Text>
-        <Text style={styles.subtitle}>{cattle.length} animals</Text>
-      </View>
-      <TouchableOpacity
-        style={styles.addButton}
-        onPress={() => navigation.navigate('AddCattle')}
-      >
-        <MaterialIcons name="add" size={24} color="#FFFFFF" />
-      </TouchableOpacity>
-    </View>
-  );
+  /**
+   * Filtering happens locally against the cached herd. That is appropriate
+   * here: a herd is tens of animals, and it keeps search working offline.
+   */
+  const visible = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return herd.filter((cow) => {
+      if (statusFilter !== 'All' && cow.current_status !== statusFilter) return false;
+      if (!term) return true;
+      return (
+        cow.name.toLowerCase().includes(term) ||
+        cow.tag_number.toLowerCase().includes(term)
+      );
+    });
+  }, [herd, search, statusFilter]);
+
+  const ageLabel = (cow: Cattle) => {
+    const months =
+      cow.age_in_months ??
+      (() => {
+        const birth = new Date(cow.date_of_birth);
+        const now = new Date();
+        return (
+          (now.getFullYear() - birth.getFullYear()) * 12 +
+          (now.getMonth() - birth.getMonth())
+        );
+      })();
+
+    if (months < 12) return `${months} mo`;
+    const years = Math.floor(months / 12);
+    const rest = months % 12;
+    return rest > 0 ? `${years}y ${rest}m` : `${years}y`;
+  };
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <Text style={styles.loadingText}>Loading cattle...</Text>
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
+      <View style={styles.header}>
+        <View style={styles.headerText}>
+          <Text style={styles.title}>My Cattle</Text>
+          <Text style={styles.subtitle}>
+            {visible.length === herd.length
+              ? `${herd.length} animals`
+              : `${visible.length} of ${herd.length}`}
+          </Text>
+        </View>
+        <SyncStatus />
+        <TouchableOpacity
+          style={styles.addButton}
+          onPress={() => navigation.navigate('AddCattle')}
+          accessibilityLabel="Add cattle"
+        >
+          <MaterialIcons name="add" size={24} color={colors.background} />
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.searchRow}>
+        <MaterialIcons name="search" size={20} color={colors.textFaint} />
+        <TextInput
+          style={styles.searchInput}
+          value={search}
+          onChangeText={setSearch}
+          placeholder="Search name or tag"
+          placeholderTextColor={colors.textDisabled}
+          autoCorrect={false}
+        />
+        {search.length > 0 && (
+          <TouchableOpacity onPress={() => setSearch('')}>
+            <MaterialIcons name="close" size={18} color={colors.textFaint} />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.filterScroll}
+        contentContainerStyle={styles.filterRow}
+      >
+        {(['All', ...CATTLE_STATUSES] as const).map((status) => (
+          <TouchableOpacity
+            key={status}
+            style={[styles.filter, statusFilter === status && styles.filterActive]}
+            onPress={() => setStatusFilter(status)}
+          >
+            <Text
+              style={[
+                styles.filterText,
+                statusFilter === status && styles.filterTextActive,
+              ]}
+            >
+              {status}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+
       <FlatList
-        data={cattle}
-        renderItem={renderCattleItem}
+        data={visible}
         keyExtractor={(item) => item._id}
-        ListHeaderComponent={renderHeader}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={styles.list}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={async () => {
+              setRefreshing(true);
+              await forceSync();
+              await load();
+            }}
+          />
         }
-        showsVerticalScrollIndicator={false}
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <MaterialIcons name="pets" size={52} color={colors.borderStrong} />
+            <Text style={styles.emptyText}>
+              {herd.length === 0 ? 'No cattle yet' : 'No matches'}
+            </Text>
+            <Text style={styles.emptyHint}>
+              {herd.length === 0 ? 'Tap + to add your first animal.' : 'Try another search.'}
+            </Text>
+          </View>
+        }
+        renderItem={({ item }) => (
+          <TouchableOpacity
+            style={styles.card}
+            onPress={() => navigation.navigate('CattleDetail', { cattleId: item._id })}
+          >
+            <View style={styles.cardHeader}>
+              <View style={styles.cardIdentity}>
+                <Text style={styles.name}>{item.name}</Text>
+                <Text style={styles.tag}>{item.tag_number}</Text>
+              </View>
+              <View
+                style={[
+                  styles.badge,
+                  { backgroundColor: statusColor[item.current_status] ?? colors.borderStrong },
+                ]}
+              >
+                <Text style={styles.badgeText}>{item.current_status}</Text>
+              </View>
+            </View>
+
+            <View style={styles.metaRow}>
+              <Meta icon="pets" text={item.breed} />
+              <Meta icon="wc" text={item.gender} />
+              <Meta icon="cake" text={ageLabel(item)} />
+              {item.weight != null && <Meta icon="fitness-center" text={`${item.weight} kg`} />}
+            </View>
+
+            <View style={styles.cardFooter}>
+              <View
+                style={[
+                  styles.healthBadge,
+                  { backgroundColor: healthColor[item.health_status] ?? colors.borderStrong },
+                ]}
+              >
+                <Text style={styles.healthText}>{item.health_status}</Text>
+              </View>
+              {item.location ? (
+                <Text style={styles.location}>{item.location}</Text>
+              ) : null}
+              <MaterialIcons
+                name="chevron-right"
+                size={20}
+                color={colors.primary}
+                style={styles.chevron}
+              />
+            </View>
+          </TouchableOpacity>
+        )}
       />
     </View>
   );
 };
 
+const Meta = ({
+  icon,
+  text,
+}: {
+  icon: keyof typeof MaterialIcons.glyphMap;
+  text: string;
+}) => (
+  <View style={styles.meta}>
+    <MaterialIcons name={icon} size={14} color={colors.textFaint} />
+    <Text style={styles.metaText}>{text}</Text>
+  </View>
+);
+
 const styles = StyleSheet.create({
-  container: {
+  container: { flex: 1, backgroundColor: colors.background },
+  centered: {
     flex: 1,
-    backgroundColor: '#0A1A23',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#0A1A23',
-  },
-  loadingText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-  },
-  listContent: {
-    paddingBottom: 20,
+    justifyContent: 'center',
+    backgroundColor: colors.background,
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
-    paddingBottom: 15,
+    gap: spacing.sm,
+    paddingHorizontal: spacing.xl,
+    paddingTop: 56,
+    paddingBottom: spacing.md,
   },
-  headerContent: {
-    flex: 1,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 5,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#C1C7CD',
-  },
+  headerText: { flex: 1 },
+  title: { fontSize: 24, fontWeight: 'bold', color: colors.text },
+  subtitle: { fontSize: 13, color: colors.textMuted, marginTop: 2 },
   addButton: {
-    backgroundColor: '#00ED64',
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    justifyContent: 'center',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.primary,
     alignItems: 'center',
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
+    justifyContent: 'center',
   },
-  cattleCard: {
-    backgroundColor: '#00374A',
-    marginHorizontal: 20,
-    marginBottom: 15,
-    borderRadius: 12,
-    padding: 16,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
+
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginHorizontal: spacing.xl,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.sm,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  searchInput: { flex: 1, color: colors.text, paddingVertical: spacing.md, fontSize: 15 },
+
+  filterScroll: { maxHeight: 52 },
+  filterRow: {
+    gap: spacing.sm,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.md,
+  },
+  filter: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    height: 30,
+    justifyContent: 'center',
+  },
+  filterActive: { backgroundColor: colors.header, borderColor: colors.primary },
+  filterText: { color: colors.textMuted, fontSize: 12 },
+  filterTextActive: { color: colors.primary, fontWeight: '700' },
+
+  list: { paddingHorizontal: spacing.xl, paddingBottom: spacing.xxl },
+  card: {
+    backgroundColor: colors.header,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
   },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 12,
+    marginBottom: spacing.md,
   },
-  nameSection: {
-    flex: 1,
-  },
-  cattleName: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 4,
-  },
-  tagNumber: {
-    fontSize: 14,
-    color: '#00ED64',
-    fontWeight: '600',
-  },
-  statusBadges: {
-    alignItems: 'flex-end',
-  },
+  cardIdentity: { flex: 1 },
+  name: { fontSize: 18, fontWeight: 'bold', color: colors.text },
+  tag: { fontSize: 13, color: colors.primary, fontWeight: '600', marginTop: 2 },
   badge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.lg,
   },
-  badgeText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  cardContent: {
-    marginBottom: 12,
-  },
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  infoText: {
-    color: '#C1C7CD',
-    marginLeft: 8,
-    fontSize: 14,
-  },
-  cardFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  healthSection: {
-    flex: 1,
-  },
+  badgeText: { color: colors.text, fontSize: 11, fontWeight: '700' },
+
+  metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginBottom: spacing.md },
+  meta: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  metaText: { color: colors.textMuted, fontSize: 12 },
+
+  cardFooter: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   healthBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
-    alignSelf: 'flex-start',
+    paddingHorizontal: spacing.md,
+    paddingVertical: 3,
+    borderRadius: radius.lg,
   },
-  healthText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '600',
-    marginLeft: 4,
-  },
-  detailsButton: {
-    padding: 8,
-  },
+  healthText: { color: colors.text, fontSize: 11, fontWeight: '600' },
+  location: { color: colors.textFaint, fontSize: 12 },
+  chevron: { marginLeft: 'auto' },
+
+  empty: { alignItems: 'center', paddingTop: 60, gap: spacing.sm },
+  emptyText: { color: colors.textMuted, fontSize: 16 },
+  emptyHint: { color: colors.textDisabled, fontSize: 13 },
 });
 
 export default CattleListScreen;

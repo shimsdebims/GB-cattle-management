@@ -1,5 +1,10 @@
 const mongoose = require('mongoose');
+const { REVENUE_SOURCES, LIMITS } = require('../constants/domain');
 
+/**
+ * Manual (non-milk) income only. Milk income is derived from production ×
+ * `Settings.milk_price_per_liter`, so recording it here would double-count it.
+ */
 const revenueSchema = new mongoose.Schema({
   date_recorded: {
     type: Date,
@@ -9,12 +14,13 @@ const revenueSchema = new mongoose.Schema({
   source: {
     type: String,
     required: true,
-    enum: ['Milk Sales', 'Cattle Sales', 'Breeding Services', 'Manure Sales', 'Other']
+    enum: REVENUE_SOURCES,
   },
   description: {
     type: String,
     required: true,
-    trim: true
+    trim: true,
+    maxlength: LIMITS.DESCRIPTION_MAX,
   },
   amount: {
     type: Number,
@@ -23,7 +29,8 @@ const revenueSchema = new mongoose.Schema({
   },
   notes: {
     type: String,
-    trim: true
+    trim: true,
+    maxlength: LIMITS.NOTES_MAX,
   }
 }, {
   timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' }
@@ -31,6 +38,6 @@ const revenueSchema = new mongoose.Schema({
 
 // Indexes
 revenueSchema.index({ date_recorded: -1 });
-revenueSchema.index({ source: 1 });
+revenueSchema.index({ source: 1, date_recorded: -1 });
 
 module.exports = mongoose.model('Revenue', revenueSchema);

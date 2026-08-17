@@ -1,243 +1,206 @@
 const express = require('express');
 const router = express.Router();
+
 const Feeding = require('../models/Feeding');
 const Cattle = require('../models/Cattle');
+const { LIMITS } = require('../constants/domain');
+const {
+  ok,
+  created,
+  paginated,
+  notFound,
+  asyncHandler,
+  parsePagination,
+  parseDateRange,
+  validationMiddleware,
+  validateIdParam,
+} = require('../middleware');
 
-// GET /api/feeding - Get all feeding records
-router.get('/', async (req, res) => {
-  try {
-    const { cattle_id, feed_type, date_from, date_to, limit = 50, page = 1 } = req.query;
-    
+// GET /api/feeding — paginated list
+router.get(
+  '/',
+  asyncHandler(async (req, res) => {
+    const { cattle_id, feed_type } = req.query;
+    const { page, limit, skip } = parsePagination(req.query, {
+      defaultLimit: LIMITS.PAGE_SIZE_DEFAULT,
+      maxLimit: LIMITS.PAGE_SIZE_MAX,
+    });
+
     const filter = {};
     if (cattle_id) filter.cattle_id = cattle_id;
-    if (feed_type) filter.feed_type = new RegExp(feed_type, 'i');
-    if (date_from || date_to) {
-      filter.date_recorded = {};
-      if (date_from) filter.date_recorded.$gte = new Date(date_from);
-      if (date_to) filter.date_recorded.$lte = new Date(date_to);
-    }
+    // Exact match against the enum rather than an unanchored regex.
+    if (feed_type) filter.feed_type = feed_type;
 
-    const skip = (page - 1) * limit;
-    
-    const feedingRecords = await Feeding.find(filter)
-      .populate('cattle_id', 'tag_number name breed')
-      .sort({ date_recorded: -1 })
-      .limit(parseInt(limit))
-      .skip(skip);
+    const dateRange = parseDateRange(req.query);
+    if (dateRange) filter.date_recorded = dateRange;
 
-    const total = await Feeding.countDocuments(filter);
+    const [items, total] = await Promise.all([
+      Feeding.find(filter)
+        .populate('cattle_id', 'tag_number name breed')
+        .sort({ date_recorded: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Feeding.countDocuments(filter),
+    ]);
 
-    res.json({
-      data: feedingRecords,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / limit)
-      }
-    });
-  } catch (error) {
-    console.error('Error fetching feeding records:', error);
-    res.status(500).json({ error: 'Failed to fetch feeding records' });
-  }
-});
+    return paginated(res, items, { total, page, limit });
+  })
+);
 
-// GET /api/feeding/:id - Get specific feeding record
-router.get('/:id', async (req, res) => {
-  try {
-    const feedingRecord = await Feeding.findById(req.params.id)
-      .populate('cattle_id', 'tag_number name breed');
-    
-    if (!feedingRecord) {
-      return res.status(404).json({ error: 'Feeding record not found' });
-    }
-
-    res.json(feedingRecord);
-  } catch (error) {
-    console.error('Error fetching feeding record:', error);
-    res.status(500).json({ error: 'Failed to fetch feeding record' });
-  }
-});
-
-// POST /api/feeding - Create new feeding record
-router.post('/', async (req, res) => {
-  try {
-    const { 
-      cattle_id, 
-      date_recorded, 
-      feed_type, 
-      quantity_kg, 
-      cost_per_unit, 
-      supplier, 
-      notes 
-    } = req.body;
-
-    // Validate required fields
-    if (!cattle_id || !date_recorded || !feed_type || !quantity_kg) {
-      return res.status(400).json({ 
-        error: 'Missing required fields: cattle_id, date_recorded, feed_type, quantity_kg' 
-      });
-    }
-
-    // Check if cattle exists
-    const cattle = await Cattle.findById(cattle_id);
-    if (!cattle) {
-      return res.status(404).json({ error: 'Cattle not found' });
-    }
-
-    const feedingRecord = new Feeding({
-      cattle_id,
-      date_recorded: new Date(date_recorded),
-      feed_type,
-      quantity_kg: parseFloat(quantity_kg),
-      cost_per_unit: cost_per_unit ? parseFloat(cost_per_unit) : undefined,
-      supplier,
-      notes
-    });
-
-    await feedingRecord.save();
-    await feedingRecord.populate('cattle_id', 'tag_number name breed');
-
-    res.status(201).json(feedingRecord);
-  } catch (error) {
-    console.error('Error creating feeding record:', error);
-    res.status(500).json({ error: 'Failed to create feeding record' });
-  }
-});
-
-// PUT /api/feeding/:id - Update feeding record
-router.put('/:id', async (req, res) => {
-  try {
-    const { 
-      cattle_id, 
-      date_recorded, 
-      feed_type, 
-      quantity_kg, 
-      cost_per_unit, 
-      supplier, 
-      notes 
-    } = req.body;
-
-    const updateData = {};
-    if (cattle_id) updateData.cattle_id = cattle_id;
-    if (date_recorded) updateData.date_recorded = new Date(date_recorded);
-    if (feed_type) updateData.feed_type = feed_type;
-    if (quantity_kg !== undefined) updateData.quantity_kg = parseFloat(quantity_kg);
-    if (cost_per_unit !== undefined) updateData.cost_per_unit = parseFloat(cost_per_unit);
-    if (supplier !== undefined) updateData.supplier = supplier;
-    if (notes !== undefined) updateData.notes = notes;
-
-    const feedingRecord = await Feeding.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true, runValidators: true }
-    ).populate('cattle_id', 'tag_number name breed');
-
-    if (!feedingRecord) {
-      return res.status(404).json({ error: 'Feeding record not found' });
-    }
-
-    res.json(feedingRecord);
-  } catch (error) {
-    console.error('Error updating feeding record:', error);
-    res.status(500).json({ error: 'Failed to update feeding record' });
-  }
-});
-
-// DELETE /api/feeding/:id - Delete feeding record
-router.delete('/:id', async (req, res) => {
-  try {
-    const feedingRecord = await Feeding.findByIdAndDelete(req.params.id);
-
-    if (!feedingRecord) {
-      return res.status(404).json({ error: 'Feeding record not found' });
-    }
-
-    res.json({ message: 'Feeding record deleted successfully' });
-  } catch (error) {
-    console.error('Error deleting feeding record:', error);
-    res.status(500).json({ error: 'Failed to delete feeding record' });
-  }
-});
-
-// GET /api/feeding/summary - Get feeding summary and analytics
-router.get('/summary/stats', async (req, res) => {
-  try {
-    const { days = 30 } = req.query;
+// GET /api/feeding/summary/stats — must precede /:id
+router.get(
+  '/summary/stats',
+  asyncHandler(async (req, res) => {
+    const days = Math.max(1, Number.parseInt(req.query.days, 10) || 30);
     const startDate = new Date();
-    startDate.setDate(startDate.getDate() - parseInt(days));
+    startDate.setDate(startDate.getDate() - days);
 
-    const summary = await Feeding.aggregate([
-      {
-        $match: {
-          date_recorded: { $gte: startDate }
-        }
-      },
-      {
-        $group: {
-          _id: null,
-          total_quantity: { $sum: '$quantity_kg' },
-          total_cost: { $sum: '$total_cost' },
-          average_cost_per_unit: { $avg: '$cost_per_unit' },
-          record_count: { $sum: 1 }
-        }
-      }
+    const match = { $match: { date_recorded: { $gte: startDate } } };
+
+    const [totals, byFeedType, daily] = await Promise.all([
+      Feeding.aggregate([
+        match,
+        {
+          $group: {
+            _id: null,
+            total_quantity: { $sum: '$quantity_kg' },
+            total_cost: { $sum: '$total_cost' },
+            average_cost_per_unit: { $avg: '$cost_per_unit' },
+            record_count: { $sum: 1 },
+          },
+        },
+      ]),
+      Feeding.aggregate([
+        match,
+        {
+          $group: {
+            _id: '$feed_type',
+            total_quantity: { $sum: '$quantity_kg' },
+            total_cost: { $sum: '$total_cost' },
+            average_cost: { $avg: '$cost_per_unit' },
+            record_count: { $sum: 1 },
+          },
+        },
+        { $sort: { total_cost: -1 } },
+      ]),
+      Feeding.aggregate([
+        match,
+        {
+          $group: {
+            _id: {
+              $dateToString: {
+                format: '%Y-%m-%d',
+                date: '$date_recorded',
+                timezone: 'UTC',
+              },
+            },
+            daily_quantity: { $sum: '$quantity_kg' },
+            daily_cost: { $sum: '$total_cost' },
+            record_count: { $sum: 1 },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]),
     ]);
 
-    const feedTypeBreakdown = await Feeding.aggregate([
-      {
-        $match: {
-          date_recorded: { $gte: startDate }
-        }
-      },
-      {
-        $group: {
-          _id: '$feed_type',
-          total_quantity: { $sum: '$quantity_kg' },
-          total_cost: { $sum: '$total_cost' },
-          average_cost: { $avg: '$cost_per_unit' },
-          record_count: { $sum: 1 }
-        }
-      },
-      {
-        $sort: { total_cost: -1 }
-      }
-    ]);
-
-    const dailyFeeding = await Feeding.aggregate([
-      {
-        $match: {
-          date_recorded: { $gte: startDate }
-        }
-      },
-      {
-        $group: {
-          _id: { $dateToString: { format: '%Y-%m-%d', date: '$date_recorded' } },
-          daily_quantity: { $sum: '$quantity_kg' },
-          daily_cost: { $sum: '$total_cost' },
-          record_count: { $sum: 1 }
-        }
-      },
-      {
-        $sort: { _id: 1 }
-      }
-    ]);
-
-    res.json({
-      summary: summary[0] || {
+    return ok(res, {
+      summary: totals[0] || {
         total_quantity: 0,
         total_cost: 0,
         average_cost_per_unit: 0,
-        record_count: 0
+        record_count: 0,
       },
-      feed_type_breakdown: feedTypeBreakdown,
-      daily_feeding: dailyFeeding,
-      period_days: parseInt(days)
+      feed_type_breakdown: byFeedType,
+      daily_feeding: daily,
+      period_days: days,
     });
-  } catch (error) {
-    console.error('Error fetching feeding summary:', error);
-    res.status(500).json({ error: 'Failed to fetch feeding summary' });
-  }
-});
+  })
+);
+
+// GET /api/feeding/:id
+router.get(
+  '/:id',
+  validateIdParam(),
+  asyncHandler(async (req, res) => {
+    const record = await Feeding.findById(req.params.id)
+      .populate('cattle_id', 'tag_number name breed')
+      .lean();
+
+    if (!record) throw notFound('Feeding record');
+    return ok(res, record);
+  })
+);
+
+// POST /api/feeding
+router.post(
+  '/',
+  validationMiddleware('feeding'),
+  asyncHandler(async (req, res) => {
+    const {
+      cattle_id,
+      date_recorded,
+      feed_type,
+      quantity_kg,
+      cost_per_unit,
+      supplier,
+      notes,
+    } = req.body;
+
+    const cattleExists = await Cattle.exists({ _id: cattle_id });
+    if (!cattleExists) throw notFound('Cattle');
+
+    // total_cost is derived by the model's pre-save hook.
+    const record = await Feeding.create({
+      cattle_id,
+      date_recorded,
+      feed_type,
+      quantity_kg,
+      cost_per_unit,
+      supplier,
+      notes,
+    });
+
+    await record.populate('cattle_id', 'tag_number name breed');
+    return created(res, record.toJSON(), 'Feeding record created');
+  })
+);
+
+// PUT /api/feeding/:id
+router.put(
+  '/:id',
+  validateIdParam(),
+  validationMiddleware('feeding', { partial: true }),
+  asyncHandler(async (req, res) => {
+    const existing = await Feeding.findById(req.params.id).lean();
+    if (!existing) throw notFound('Feeding record');
+
+    // Merge with the stored row so a partial edit still recomputes total_cost
+    // from the correct quantity and unit cost.
+    const merged = { ...existing, ...req.body };
+    const update = { ...req.body };
+
+    const total_cost = Feeding.deriveTotalCost(merged);
+    if (total_cost !== undefined) update.total_cost = total_cost;
+
+    const record = await Feeding.findByIdAndUpdate(req.params.id, update, {
+      new: true,
+      runValidators: true,
+    }).populate('cattle_id', 'tag_number name breed');
+
+    return ok(res, record.toJSON(), 'Feeding record updated');
+  })
+);
+
+// DELETE /api/feeding/:id
+router.delete(
+  '/:id',
+  validateIdParam(),
+  asyncHandler(async (req, res) => {
+    const record = await Feeding.findByIdAndDelete(req.params.id).lean();
+    if (!record) throw notFound('Feeding record');
+    return ok(res, { _id: req.params.id }, 'Feeding record deleted');
+  })
+);
 
 module.exports = router;

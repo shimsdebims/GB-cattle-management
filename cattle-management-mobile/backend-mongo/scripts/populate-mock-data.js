@@ -1,319 +1,286 @@
-const mongoose = require('mongoose');
+/**
+ * Seeds a realistic dataset for local development.
+ *
+ * Deliberately generates more than one page of records (see MILK_DAYS) so the
+ * dashboard and monthly aggregations are exercised beyond the pagination limit.
+ *
+ * Usage:  npm run populate
+ *         npm run populate -- --cows=30 --days=90
+ */
 require('dotenv').config();
 
-// Import models
+const db = require('../db');
 const Cattle = require('../models/Cattle');
 const MilkProduction = require('../models/MilkProduction');
 const Feeding = require('../models/Feeding');
 const Expense = require('../models/Expense');
 const Revenue = require('../models/Revenue');
+const Settings = require('../models/Settings');
 
-// Mock data constants
-const BREEDS = ['Holstein', 'Jersey', 'Angus', 'Hereford', 'Brahman', 'Simmental', 'Charolais'];
-const HEALTH_STATUSES = ['Healthy', 'Sick', 'Injured', 'Pregnant', 'Recovering'];
-const CURRENT_STATUSES = ['Active', 'Sold', 'Deceased', 'Quarantined'];
-const LOCATIONS = ['Barn A', 'Barn B', 'Pasture 1', 'Pasture 2', 'Quarantine Area'];
-const FEED_TYPES = ['Hay', 'Corn Silage', 'Barley', 'Wheat', 'Alfalfa', 'Grass Pellets', 'Protein Supplement'];
-const EXPENSE_CATEGORIES = ['Feed', 'Veterinary', 'Equipment', 'Maintenance', 'Utilities', 'Labor', 'Insurance'];
-const REVENUE_SOURCES = ['Milk Sales', 'Cattle Sales', 'Breeding Services', 'Manure Sales'];
+const {
+  BREEDS,
+  HEALTH_STATUSES,
+  FEED_TYPES,
+  EXPENSE_CATEGORIES,
+  REVENUE_SOURCES,
+  CATTLE_LOCATIONS,
+} = require('../constants/domain');
+const { startOfUtcDay } = require('../utils/dates');
 
-// Helper functions
-const randomChoice = (array) => array[Math.floor(Math.random() * array.length)];
-const randomFloat = (min, max) => Math.random() * (max - min) + min;
-const randomInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
-const randomDate = (start, end) => new Date(start.getTime() + Math.random() * (end.getTime() - start.getTime()));
+// ─── Config ──────────────────────────────────────────────────────────────────
 
-async function createMockCattle() {
-  console.log('Creating mock cattle...');
-  const cattle = [];
-  
-  for (let i = 1; i <= 15; i++) {
-    const dateOfBirth = randomDate(new Date(2020, 0, 1), new Date(2023, 11, 31));
-    const purchaseDate = randomDate(new Date(2023, 0, 1), new Date(2024, 11, 31));
-    
-    const cattleData = {
-      tag_number: `GB${String(i).padStart(4, '0')}`,
-      name: `${randomChoice(['Daisy', 'Bella', 'Luna', 'Rosie', 'Molly', 'Ruby', 'Stella', 'Coco', 'Penny', 'Ginger'])} ${i}`,
-      breed: randomChoice(BREEDS),
-      date_of_birth: dateOfBirth,
-      gender: randomChoice(['Male', 'Female']),
-      weight: randomFloat(400, 800),
-      health_status: randomChoice(HEALTH_STATUSES),
-      location: randomChoice(LOCATIONS),
-      purchase_date: purchaseDate,
-      purchase_price: randomFloat(1000, 2500),
-      current_status: randomChoice(CURRENT_STATUSES.filter(s => s !== 'Deceased')), // Mostly active cattle
-      notes: randomChoice([
-        'High milk producer',
-        'Good breeding stock',
-        'Excellent health record',
-        'Strong genetics',
-        'High breeding value',
-        null
-      ])
+function readArg(name, fallback) {
+  const match = process.argv.find((arg) => arg.startsWith(`--${name}=`));
+  if (!match) return fallback;
+  const value = Number.parseInt(match.split('=')[1], 10);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+const COW_COUNT = readArg('cows', 20);
+const MILK_DAYS = readArg('days', 60);
+const FEEDING_DAYS = 30;
+const EXPENSE_COUNT = 60;
+const REVENUE_COUNT = 12;
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+const randFloat = (min, max) => Math.random() * (max - min) + min;
+const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+const round1 = (n) => Math.round(n * 10) / 10;
+
+/** UTC-midnight date `daysBack` days before today. */
+function dayOffset(daysBack) {
+  const d = new Date();
+  d.setDate(d.getDate() - daysBack);
+  return startOfUtcDay(d);
+}
+
+const COW_NAMES = [
+  'Daisy', 'Bella', 'Luna', 'Rosie', 'Molly', 'Ruby', 'Stella', 'Coco',
+  'Penny', 'Ginger', 'Nala', 'Maya', 'Zuri', 'Amara', 'Imena', 'Keza',
+  'Iragi', 'Shani', 'Neza', 'Tosha',
+];
+
+const SUPPLIERS = [
+  'Farm Supply Co',
+  'Green Valley Feeds',
+  'Bujumbura Agro',
+  'Local Cooperative',
+];
+
+// ─── Builders ────────────────────────────────────────────────────────────────
+
+function buildCattle() {
+  return Array.from({ length: COW_COUNT }, (_, i) => {
+    // Mostly active, milking females so the reports have real signal.
+    const isFemale = i % 10 !== 0;
+
+    return {
+      tag_number: `GB${String(i + 1).padStart(4, '0')}`,
+      name: `${COW_NAMES[i % COW_NAMES.length]}${i >= COW_NAMES.length ? ` ${i}` : ''}`,
+      breed: pick(BREEDS),
+      date_of_birth: new Date(randInt(2018, 2023), randInt(0, 11), randInt(1, 28)),
+      gender: isFemale ? 'Female' : 'Male',
+      weight: Math.round(randFloat(350, 700)),
+      health_status: i % 7 === 0 ? pick(HEALTH_STATUSES) : 'Healthy',
+      location: pick(CATTLE_LOCATIONS),
+      purchase_date: new Date(randInt(2023, 2025), randInt(0, 11), randInt(1, 28)),
+      // BIF scale: a dairy cow is on the order of millions of francs.
+      purchase_price: randInt(800, 2500) * 1000,
+      current_status: i % 11 === 0 ? 'Sold' : 'Active',
+      notes: pick(['High milk producer', 'Good breeding stock', 'Steady yield', null]),
     };
-    
-    cattle.push(cattleData);
-  }
-  
-  return await Cattle.insertMany(cattle);
+  });
 }
 
-async function createMockMilkProduction(cattleList) {
-  console.log('Creating mock milk production records...');
-  const milkRecords = [];
-  
-  // Create records for the last 30 days
-  const endDate = new Date();
-  const startDate = new Date();
-  startDate.setDate(startDate.getDate() - 30);
-  
-  for (const cattle of cattleList) {
-    // Skip if cattle is not active or is male
-    if (cattle.current_status !== 'Active' || cattle.gender === 'Male') continue;
-    
-    // Create 1-2 records per day for each cattle
-    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-      const recordsPerDay = randomInt(1, 2);
-      
-      for (let r = 0; r < recordsPerDay; r++) {
-        const recordDate = new Date(d);
-        recordDate.setHours(randomInt(5, 18), randomInt(0, 59), 0, 0);
-        
-        milkRecords.push({
-          cattle_id: cattle._id,
-          date_recorded: recordDate,
-          quantity_liters: randomFloat(15, 35), // Liters per session
-          quality_score: randomFloat(7, 10),
-          notes: randomChoice([
-            'Good quality milk',
-            'Excellent production',
-            'Normal milking session',
-            'High fat content',
-            null
-          ])
-        });
-      }
+/**
+ * One record per cow per day — the unique (cattle_id, date_recorded) index
+ * rejects anything else, and it matches how the farm actually books a day's
+ * total per animal.
+ */
+function buildMilk(herd) {
+  const records = [];
+
+  for (const cow of herd) {
+    if (cow.current_status !== 'Active' || cow.gender !== 'Female') continue;
+
+    // A per-cow baseline makes the "top producer" ranking meaningful.
+    const baseline = randFloat(12, 28);
+
+    for (let daysBack = 0; daysBack < MILK_DAYS; daysBack += 1) {
+      // Occasional gap, like a real logbook.
+      if (Math.random() < 0.08) continue;
+
+      records.push({
+        cattle_id: cow._id,
+        date_recorded: dayOffset(daysBack),
+        quantity_liters: round1(Math.max(1, baseline + randFloat(-3, 3))),
+        quality_score: randInt(6, 10),
+        notes: Math.random() < 0.1 ? pick(['Good quality', 'High fat content']) : undefined,
+      });
     }
   }
-  
-  return await MilkProduction.insertMany(milkRecords);
+
+  return records;
 }
 
-async function createMockFeeding(cattleList) {
-  console.log('Creating mock feeding records...');
-  const feedingRecords = [];
-  
-  // Create records for the last 30 days
-  const endDate = new Date();
-  const startDate = new Date();
-  startDate.setDate(startDate.getDate() - 30);
-  
-  for (const cattle of cattleList) {
-    // Skip if cattle is not active
-    if (cattle.current_status !== 'Active') continue;
-    
-    // Create 2-3 feeding records per day for each cattle
-    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-      const feedingsPerDay = randomInt(2, 3);
-      
-      for (let f = 0; f < feedingsPerDay; f++) {
-        const feedDate = new Date(d);
-        feedDate.setHours(randomInt(6, 20), randomInt(0, 59), 0, 0);
-        
-        const feedType = randomChoice(FEED_TYPES);
-        const quantity = randomFloat(5, 15); // kg
-        const costPerUnit = randomFloat(0.5, 2.5); // per kg
-        
-        feedingRecords.push({
-          cattle_id: cattle._id,
-          date_recorded: feedDate,
-          feed_type: feedType,
-          quantity_kg: quantity,
-          cost_per_unit: costPerUnit,
-          total_cost: quantity * costPerUnit,
-          supplier: randomChoice(['Farm Supply Co', 'Green Valley Feeds', 'Country Feed Store', 'Local Farmer', null]),
-          notes: randomChoice([
-            'Regular feeding',
-            'Extra nutrition needed',
-            'High quality feed',
-            'Bulk purchase discount',
-            null
-          ])
-        });
-      }
+function buildFeeding(herd) {
+  const records = [];
+
+  for (const cow of herd) {
+    if (cow.current_status !== 'Active') continue;
+
+    for (let daysBack = 0; daysBack < FEEDING_DAYS; daysBack += 1) {
+      if (Math.random() < 0.3) continue;
+
+      const quantity = round1(randFloat(5, 15));
+      const costPerUnit = randInt(400, 1200);
+
+      records.push({
+        cattle_id: cow._id,
+        date_recorded: dayOffset(daysBack),
+        feed_type: pick(FEED_TYPES),
+        quantity_kg: quantity,
+        cost_per_unit: costPerUnit,
+        total_cost: quantity * costPerUnit,
+        supplier: pick(SUPPLIERS),
+      });
     }
   }
-  
-  return await Feeding.insertMany(feedingRecords);
+
+  return records;
 }
 
-async function createMockExpenses() {
-  console.log('Creating mock expenses...');
-  const expenses = [];
-  
-  // Create expenses for the last 90 days
-  const endDate = new Date();
-  const startDate = new Date();
-  startDate.setDate(startDate.getDate() - 90);
-  
-  for (let i = 0; i < 25; i++) {
-    const expenseDate = randomDate(startDate, endDate);
-    const category = randomChoice(EXPENSE_CATEGORIES);
-    
-    let amount, description;
-    switch (category) {
-      case 'Feed':
-        amount = randomFloat(200, 800);
-        description = `${randomChoice(FEED_TYPES)} purchase`;
-        break;
-      case 'Veterinary':
-        amount = randomFloat(50, 300);
-        description = randomChoice(['Vaccination', 'Health checkup', 'Treatment', 'Emergency care']);
-        break;
-      case 'Equipment':
-        amount = randomFloat(100, 1500);
-        description = randomChoice(['Milking equipment', 'Feeding tools', 'Maintenance tools', 'Farm machinery']);
-        break;
-      case 'Maintenance':
-        amount = randomFloat(75, 500);
-        description = randomChoice(['Barn repair', 'Fence maintenance', 'Equipment service', 'Facility upgrade']);
-        break;
-      case 'Utilities':
-        amount = randomFloat(150, 400);
-        description = randomChoice(['Electricity bill', 'Water bill', 'Gas bill', 'Internet/Phone']);
-        break;
-      case 'Labor':
-        amount = randomFloat(300, 1200);
-        description = randomChoice(['Farm worker salary', 'Veterinarian fee', 'Consultant fee', 'Temporary help']);
-        break;
-      case 'Insurance':
-        amount = randomFloat(200, 600);
-        description = 'Insurance premium';
-        break;
-      default:
-        amount = randomFloat(50, 500);
-        description = 'General expense';
-    }
-    
-    expenses.push({
-      date_recorded: expenseDate,
-      category: category,
-      description: description,
-      amount: amount,
-      supplier: randomChoice(['Farm Supply Co', 'Local Vendor', 'Service Provider', 'Equipment Dealer', null]),
-      receipt_number: `RCP${randomInt(1000, 9999)}`,
-      notes: randomChoice([
-        'Regular expense',
-        'Urgent purchase',
-        'Bulk discount applied',
-        'Emergency expense',
-        'Planned purchase',
-        null
-      ])
-    });
+/** BIF-scale amounts per category, matching the farm's real bookkeeping. */
+const EXPENSE_PROFILE = {
+  Concentrates: { min: 150000, max: 600000, description: 'Concentrate purchase' },
+  Protein: { min: 100000, max: 400000, description: 'Protein supplement' },
+  Medical: { min: 30000, max: 250000, description: 'Veterinary treatment' },
+  'Salary - Manager': { min: 300000, max: 500000, description: 'Manager salary' },
+  'Salary - Workers': { min: 150000, max: 400000, description: 'Worker wages' },
+  'Cattle Tax': { min: 50000, max: 150000, description: 'Cattle tax payment' },
+  Insurance: { min: 80000, max: 200000, description: 'Insurance premium' },
+  Bedding: { min: 40000, max: 120000, description: 'Bedding materials' },
+  'Other Operations': { min: 20000, max: 200000, description: 'General operations' },
+};
+
+function buildExpenses() {
+  return Array.from({ length: EXPENSE_COUNT }, () => {
+    const category = pick(EXPENSE_CATEGORIES);
+    const profile = EXPENSE_PROFILE[category];
+
+    // Half the rows are line items with quantity × unit cost, like the app's form.
+    const useLineItem = Math.random() < 0.5;
+    const quantity = useLineItem ? randInt(5, 60) : undefined;
+    const costPerUnit = useLineItem ? randInt(1000, 6000) : undefined;
+    const amount = useLineItem
+      ? quantity * costPerUnit
+      : randInt(profile.min, profile.max);
+
+    return {
+      date_recorded: dayOffset(randInt(0, 89)),
+      category,
+      description: profile.description,
+      quantity,
+      cost_per_unit: costPerUnit,
+      amount,
+      supplier: pick(SUPPLIERS),
+      receipt_number: `RCP${randInt(1000, 9999)}`,
+    };
+  });
+}
+
+function buildRevenue() {
+  return Array.from({ length: REVENUE_COUNT }, () => {
+    const source = pick(REVENUE_SOURCES);
+    const amounts = {
+      'Cattle Sale': [800000, 2500000],
+      'Breeding Services': [50000, 200000],
+      'Manure Sales': [20000, 100000],
+      Other: [30000, 300000],
+    };
+    const [min, max] = amounts[source];
+
+    return {
+      date_recorded: dayOffset(randInt(0, 59)),
+      source,
+      description: `${source} income`,
+      amount: randInt(min, max),
+    };
+  });
+}
+
+// ─── Main ────────────────────────────────────────────────────────────────────
+
+async function populate() {
+  const uri = process.env.MONGODB_URI;
+
+  if (db.isUnusableUri(uri)) {
+    console.error(
+      '\n❌  MONGODB_URI is not set. Copy .env.example to .env and set it first.\n'
+    );
+    process.exit(1);
   }
-  
-  return await Expense.insertMany(expenses);
+
+  await db.connect(uri, { required: true });
+  console.log(`Connected to "${db.mongoose.connection.name}"`);
+
+  console.log('Clearing existing data...');
+  await Promise.all([
+    Cattle.deleteMany({}),
+    MilkProduction.deleteMany({}),
+    Feeding.deleteMany({}),
+    Expense.deleteMany({}),
+    Revenue.deleteMany({}),
+  ]);
+
+  // Ensure indexes exist before bulk inserts so constraints are enforced.
+  await db.syncIndexes([Cattle, MilkProduction, Feeding, Expense, Revenue, Settings]);
+
+  console.log('Seeding...');
+  const herd = await Cattle.insertMany(buildCattle());
+  const milk = await MilkProduction.insertMany(buildMilk(herd));
+  const feeding = await Feeding.insertMany(buildFeeding(herd));
+  const expenses = await Expense.insertMany(buildExpenses());
+  const revenue = await Revenue.insertMany(buildRevenue());
+  const settings = await Settings.getSingleton();
+
+  const totalLiters = milk.reduce((sum, r) => sum + r.quantity_liters, 0);
+
+  console.log('\n✅  Seed complete');
+  console.log(`   cattle:   ${herd.length}`);
+  console.log(`   milk:     ${milk.length} records over ${MILK_DAYS} days`);
+  console.log(`   feeding:  ${feeding.length}`);
+  console.log(`   expenses: ${expenses.length}`);
+  console.log(`   revenue:  ${revenue.length}`);
+  console.log(
+    `   total milk: ${Math.round(totalLiters)} L ` +
+      `(~${Math.round(totalLiters * settings.milk_price_per_liter).toLocaleString()} ` +
+      `${settings.currency})`
+  );
+  console.log(
+    `\n   Note: ${milk.length} milk records exceeds the ${50}-record page size, ` +
+      'so the dashboard aggregation is genuinely exercised.\n'
+  );
+
+  await db.disconnect();
 }
 
-async function createMockRevenue() {
-  console.log('Creating mock revenue records...');
-  const revenues = [];
-  
-  // Create revenue for the last 60 days
-  const endDate = new Date();
-  const startDate = new Date();
-  startDate.setDate(startDate.getDate() - 60);
-  
-  for (let i = 0; i < 20; i++) {
-    const revenueDate = randomDate(startDate, endDate);
-    const source = randomChoice(REVENUE_SOURCES);
-    
-    let amount, description;
-    switch (source) {
-      case 'Milk Sales':
-        amount = randomFloat(500, 2000);
-        description = `Milk sales - ${randomInt(100, 500)} liters`;
-        break;
-      case 'Cattle Sales':
-        amount = randomFloat(1500, 3500);
-        description = `Cattle sale - ${randomChoice(['Bull', 'Cow', 'Heifer'])}`;
-        break;
-      case 'Breeding Services':
-        amount = randomFloat(200, 800);
-        description = 'Breeding service fee';
-        break;
-      case 'Manure Sales':
-        amount = randomFloat(100, 400);
-        description = 'Organic manure sales';
-        break;
-      default:
-        amount = randomFloat(100, 1000);
-        description = 'Other farm income';
-    }
-    
-    revenues.push({
-      date_recorded: revenueDate,
-      source: source,
-      description: description,
-      amount: amount,
-      notes: randomChoice([
-        'Regular income',
-        'Premium price received',
-        'Bulk sale',
-        'Contract sale',
-        'Spot market sale',
-        null
-      ])
-    });
-  }
-  
-  return await Revenue.insertMany(revenues);
-}
-
-async function populateDatabase() {
-  try {
-    console.log('Connecting to MongoDB...');
-    await mongoose.connect(process.env.MONGODB_URI);
-    console.log('Connected to MongoDB');
-    
-    // Clear existing data
-    console.log('Clearing existing data...');
-    await Promise.all([
-      Cattle.deleteMany({}),
-      MilkProduction.deleteMany({}),
-      Feeding.deleteMany({}),
-      Expense.deleteMany({}),
-      Revenue.deleteMany({})
-    ]);
-    
-    // Create mock data
-    const cattle = await createMockCattle();
-    const milkRecords = await createMockMilkProduction(cattle);
-    const feedingRecords = await createMockFeeding(cattle);
-    const expenses = await createMockExpenses();
-    const revenues = await createMockRevenue();
-    
-    console.log('\n✅ Mock data populated successfully!');
-    console.log('Created:');
-    console.log(`  - ${cattle.length} cattle records`);
-    console.log(`  - ${milkRecords.length} milk production records`);
-    console.log(`  - ${feedingRecords.length} feeding records`);
-    console.log(`  - ${expenses.length} expense records`);
-    console.log(`  - ${revenues.length} revenue records`);
-    
-  } catch (error) {
-    console.error('Error populating database:', error);
-  } finally {
-    await mongoose.connection.close();
-    console.log('Database connection closed');
-  }
-}
-
-// Run the population script
+// Only auto-run when invoked directly, so tests can import the builders.
 if (require.main === module) {
-  populateDatabase();
+  populate().catch(async (error) => {
+    console.error('Seed failed:', error.message);
+    await db.disconnect();
+    process.exit(1);
+  });
 }
 
-module.exports = { populateDatabase };
+module.exports = {
+  populate,
+  buildCattle,
+  buildMilk,
+  buildFeeding,
+  buildExpenses,
+  buildRevenue,
+};

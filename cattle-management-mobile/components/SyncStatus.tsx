@@ -1,53 +1,58 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import React from 'react';
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import NetInfo from '@react-native-community/netinfo';
+
 import { useOfflineAPI } from '../hooks/useOfflineAPI';
 
+/**
+ * Compact connectivity / queue indicator.
+ * Tapping it retries the queue when there is something to send.
+ */
 const SyncStatus = () => {
-  const [isOnline, setIsOnline] = useState(true);
-  const { syncStatus, forceSync } = useOfflineAPI();
+  const { isOnline, isSyncing, pendingCount, failedCount, forceSync } = useOfflineAPI();
 
-  useEffect(() => {
-    const unsubscribe = NetInfo.addEventListener(state => {
-      setIsOnline(state.isConnected ?? false);
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  const handleSync = async () => {
-    if (isOnline) {
-      await forceSync();
+  const status = (() => {
+    if (isSyncing) return { color: '#2196F3', icon: 'sync' as const, label: 'Syncing…' };
+    if (!isOnline) {
+      return {
+        color: '#FF5722',
+        icon: 'cloud-off' as const,
+        label: pendingCount > 0 ? `Offline · ${pendingCount}` : 'Offline',
+      };
     }
-  };
+    if (failedCount > 0) {
+      return {
+        color: '#F44336',
+        icon: 'error-outline' as const,
+        label: `${failedCount} failed`,
+      };
+    }
+    if (pendingCount > 0) {
+      return {
+        color: '#FF9800',
+        icon: 'cloud-upload' as const,
+        label: `${pendingCount} pending`,
+      };
+    }
+    return { color: '#4CAF50', icon: 'cloud-done' as const, label: 'Synced' };
+  })();
 
-  const getStatusColor = () => {
-    if (!isOnline) return '#FF5722';
-    if (syncStatus.pendingCount > 0) return '#FF9800';
-    return '#4CAF50';
-  };
-
-  const getStatusText = () => {
-    if (!isOnline) return 'Offline';
-    if (syncStatus.pendingCount > 0) return `${syncStatus.pendingCount} pending`;
-    return 'Synced';
-  };
-
-  const getStatusIcon = () => {
-    if (!isOnline) return 'cloud-off';
-    if (syncStatus.pendingCount > 0) return 'cloud-sync';
-    return 'cloud-done';
-  };
+  const canRetry = isOnline && !isSyncing && (pendingCount > 0 || failedCount > 0);
 
   return (
-    <TouchableOpacity 
-      style={[styles.container, { backgroundColor: getStatusColor() }]}
-      onPress={handleSync}
-      disabled={!isOnline}
+    <TouchableOpacity
+      style={[styles.container, { backgroundColor: status.color }]}
+      onPress={canRetry ? forceSync : undefined}
+      disabled={!canRetry}
+      accessibilityRole="button"
+      accessibilityLabel={`Sync status: ${status.label}`}
     >
-      <MaterialIcons name={getStatusIcon()} size={16} color="#FFFFFF" />
-      <Text style={styles.text}>{getStatusText()}</Text>
+      {isSyncing ? (
+        <ActivityIndicator size="small" color="#FFFFFF" />
+      ) : (
+        <MaterialIcons name={status.icon} size={16} color="#FFFFFF" />
+      )}
+      <Text style={styles.text}>{status.label}</Text>
     </TouchableOpacity>
   );
 };
@@ -56,16 +61,15 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
+    gap: 4,
+    paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 16,
-    margin: 10,
   },
   text: {
     color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '600',
-    marginLeft: 4,
   },
 });
 
