@@ -1,45 +1,22 @@
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-*.so
-*.egg
-*.egg-info/
-dist/
-build/
-venv/
-.venv/
-env/
-
-# Environment variables - never commit real secrets
+# Environment variables — never commit real secrets
 **/.env
-backend/.env
-frontend/.env
-cattle-management-mobile/.env
-cattle-management-mobile/backend-mongo/.env
+!**/.env.example
 
-# SQLite database
-*.db
-*.sqlite
-*.sqlite3
-backend/instance/
-
-# Node modules
+# Node
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# React build
-frontend/build/
-frontend/coverage/
-
 # Expo / React Native
 .expo/
-cattle-management-mobile/dist/
-cattle-management-mobile/web-build/
+dist/
+web-build/
 expo-env.d.ts
+*.jks
+*.p8
+*.p12
+*.mobileprovision
 
 # macOS
 .DS_Store

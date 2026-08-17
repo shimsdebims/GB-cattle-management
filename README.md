@@ -1,236 +1,152 @@
-# Dairy Cattle Management System
+# GB Dairy Cattle Management
 
-A comprehensive web application for managing dairy cattle operations, tracking milk production, feeding records, financial data, and providing analytics with matplotlib visualizations.
+A mobile app for running a dairy farm: track the herd, record daily milk yield,
+log feeding and expenses, and see monthly income per cow.
 
-## Features
+Built for a farm in Burundi, so all money is in **Burundian Francs (BIF / FBu)**
+and milk income is **calculated** from recorded production rather than typed in
+by hand.
 
-### 🐄 Cattle Management
-- Track individual cattle information (tag number, breed, health status, etc.)
-- Monitor cattle lifecycle from birth to sale
-- Manage cattle locations and health records
+## Stack
 
-### 🥛 Milk Production Tracking
-- Daily milk production recording
-- Quality scoring system
-- Production trends and analytics
-- Cow-by-cow production comparison
+- **App** — React Native via Expo (SDK 53), TypeScript, React Navigation
+- **API** — Node.js, Express, Mongoose
+- **Database** — MongoDB Atlas
+- **Tests** — Jest + Supertest against an in-memory MongoDB
 
-### 🌾 Feeding Management
-- Track feed types and quantities
-- Monitor feeding costs per cattle
-- Feed supplier management
-- Nutritional analysis
+## Repository layout
 
-### 💰 Financial Management
-- Expense tracking by category
-- Revenue recording from multiple sources
-- Profit/loss analysis
-- ROI calculations per cattle
-
-### 📊 Analytics & Reporting
-- Interactive charts using matplotlib
-- Milk production trend analysis
-- Cattle performance comparison
-- Financial overview dashboards
-- Feed cost analysis
-
-## Technology Stack
-
-### Backend
-- **Python 3.8+** with Flask
-- **SQLAlchemy** for database ORM
-- **SQLite** for development database
-- **matplotlib** for chart generation
-- **pandas** for data analysis
-- **Flask-CORS** for cross-origin requests
-
-### Frontend
-- **React 18** with TypeScript
-- **Material-UI (MUI)** for component library
-- **React Router** for navigation
-- **Axios** for API communication
-- **Recharts** for additional charting
-
-## Installation
-
-### Prerequisites
-- Python 3.8 or higher
-- Node.js 16 or higher
-- npm or yarn
-
-### Backend Setup
-
-1. Navigate to the backend directory:
-```bash
-cd backend
+```
+cattle-management-mobile/        the Expo app
+├── screens/                     one file per screen
+├── services/                    API client, offline queue
+├── hooks/  components/  utils/  constants/  types/
+└── backend-mongo/               the Express API
+    ├── routes/                  one file per resource
+    ├── models/                  Mongoose schemas
+    ├── middleware/              validation + response helpers
+    ├── constants/domain.js      the shared vocabulary (see below)
+    ├── scripts/                 seed, connection check, smoke test
+    └── tests/                   83 tests, no external database needed
 ```
 
-2. Create a virtual environment:
+## Getting started
+
+You need Node 18+ and a MongoDB Atlas cluster (the free tier is fine).
+
+### 1. Start the API
+
 ```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-4. Set up environment variables:
-```bash
-cp .env.example .env
-# Edit .env file with your configuration
-```
-
-5. Initialize the database:
-```bash
-python app.py
-```
-
-The backend will start on `http://localhost:5000`
-
-### Frontend Setup
-
-1. Navigate to the frontend directory:
-```bash
-cd frontend
-```
-
-2. Install dependencies:
-```bash
+cd cattle-management-mobile/backend-mongo
 npm install
-```
-
-3. Set up environment variables:
-```bash
 cp .env.example .env
-# Edit .env file if needed
 ```
 
-4. Start the development server:
+Open `.env` and set `MONGODB_URI` to your Atlas connection string. Include a
+database name before the `?`, otherwise Mongoose quietly uses one called `test`:
+
+```
+MONGODB_URI=mongodb+srv://USER:PASSWORD@cluster0.xxxxx.mongodb.net/cattle-management?retryWrites=true&w=majority
+```
+
+Then verify and start:
+
 ```bash
-npm start
+npm run check      # confirms the connection, prints no credentials
+npm run populate   # optional: seed ~20 cows and ~900 milk records
+npm run dev        # http://localhost:8080
 ```
 
-The frontend will start on `http://localhost:3000`
+### 2. Start the app
 
-## API Endpoints
+```bash
+cd cattle-management-mobile
+npm install
+npx expo start
+```
 
-### Cattle Management
-- `GET /api/cattle` - Get all cattle
-- `POST /api/cattle` - Create new cattle record
-- `GET /api/cattle/{id}` - Get specific cattle
-- `PUT /api/cattle/{id}` - Update cattle record
-- `DELETE /api/cattle/{id}` - Delete cattle record
+Press `i` for the iOS simulator, `a` for Android, or scan the QR code with
+Expo Go on a phone.
 
-### Milk Production
-- `GET /api/milk` - Get milk production records
-- `POST /api/milk` - Create milk production record
-- `GET /api/milk/summary` - Get production summary
-- `PUT /api/milk/{id}` - Update milk record
-- `DELETE /api/milk/{id}` - Delete milk record
+**You normally do not need to configure the API URL.** The app reads the host
+from the Expo dev server, so it finds `http://<your-machine-ip>:8080/api` on its
+own. Phone and computer must be on the same network.
 
-### Feeding Management
-- `GET /api/feeding` - Get feeding records
-- `POST /api/feeding` - Create feeding record
-- `PUT /api/feeding/{id}` - Update feeding record
-- `DELETE /api/feeding/{id}` - Delete feeding record
+To point it somewhere else, set `EXPO_PUBLIC_API_URL` in
+`cattle-management-mobile/.env` — see `.env.example`.
 
-### Financial Management
-- `GET /api/financial/expenses` - Get expenses
-- `POST /api/financial/expenses` - Create expense
-- `GET /api/financial/revenue` - Get revenue records
-- `POST /api/financial/revenue` - Create revenue record
-- `GET /api/financial/summary` - Get financial summary
+## How the app is organised
 
-### Analytics
-- `GET /api/analytics/milk-production-chart` - Get milk production chart
-- `GET /api/analytics/cattle-comparison` - Get cattle comparison chart
-- `GET /api/analytics/financial-overview` - Get financial overview chart
-- `GET /api/analytics/feeding-cost-analysis` - Get feeding cost analysis
+Seven tabs:
 
-## Usage
+- **Dashboard** — herd, production and financial totals for the last 30 days
+- **Cattle** — searchable herd list, filter by status; tap for full detail
+- **Milk** — daily yield per cow
+- **Feeding** — feed type, quantity and cost
+- **Financial** — milk income per cow, expenses, other revenue, net profit
+- **Monthly** — cow × day yield grid, mirroring the farm's spreadsheet
+- **Analytics** — not built yet; links to the reports above
 
-### Adding New Cattle
-1. Navigate to "Cattle Management"
-2. Click "Add New Cattle"
-3. Fill in cattle information (tag number, name, breed, etc.)
-4. Save the record
+## Domain rules worth knowing
 
-### Recording Milk Production
-1. Go to "Milk Production"
-2. Select the cattle
-3. Enter daily milk quantity and quality score
-4. Save the record
+These are deliberate and enforced by the API:
 
-### Tracking Expenses and Revenue
-1. Navigate to "Financial Management"
-2. Add expenses by category (Feed, Veterinary, Equipment, etc.)
-3. Record revenue from milk sales or cattle sales
-4. View financial summaries and reports
+- **Milk income is derived, never entered.** Revenue = litres recorded × the
+  price per litre in Settings. Recording milk as manual revenue would
+  double-count it, so `Milk Sales` is not an accepted revenue source.
+- **One milk record per cow per calendar day.** Enforced by a unique index, so
+  double entry is rejected rather than silently doubling a day's total.
+- **Dates are calendar dates** (`YYYY-MM-DD`), stored at UTC midnight. Sending a
+  full timestamp from a UTC+2 phone would shift the day backwards.
+- **Expense amounts can be derived** from quantity × cost per unit. When both
+  are given, the derived value wins so the total can't contradict the line item.
 
-### Viewing Analytics
-1. Go to "Analytics Dashboard"
-2. Select time period (7 days, 30 days, 90 days, or 1 year)
-3. View various charts and insights:
-   - Milk production trends
-   - Cattle performance comparison
-   - Financial overview
-   - Feeding cost analysis
+## The shared vocabulary
 
-## Database Schema
+Breeds, statuses, health states, feed types, expense categories and revenue
+sources are defined **once** and mirrored in two files:
 
-### Cattle Table
-- ID, Tag Number, Name, Breed
-- Date of Birth, Gender, Weight
-- Health Status, Location
-- Purchase Date/Price, Current Status
+- `backend-mongo/constants/domain.js` — used by the schemas, validators, routes
+  and seeder
+- `types/domain.ts` — used by the app's pickers and its TypeScript union types
 
-### Milk Production Table
-- Cattle ID, Date Recorded
-- Quantity (Liters), Quality Score
-- Notes
+If you change one, change the other. This is what stops a dropdown from
+offering a value the API will reject.
 
-### Feeding Table
-- Cattle ID, Date Recorded
-- Feed Type, Quantity (kg)
-- Cost per Unit, Total Cost
-- Supplier, Notes
+## Offline behaviour
 
-### Expenses Table
-- Date, Category, Description
-- Amount, Supplier, Receipt Number
+The app is offline-first. Writes hit a local cache immediately and queue a
+durable operation; the queue replays in order when the connection returns,
+mapping temporary IDs onto the IDs the server assigns. The badge in the header
+shows connection and queue state, and Settings lists anything that failed.
 
-### Revenue Table
-- Date, Source, Description
-- Amount, Notes
+## Commands
 
-## Development
+From `cattle-management-mobile/backend-mongo`:
 
-### Adding New Features
-1. Backend: Add new routes in `routes/` directory
-2. Frontend: Create new components in `components/` or pages in `pages/`
-3. Update API service in `services/api.ts`
-4. Add new types in `types/index.ts`
+- `npm run dev` — start with auto-reload
+- `npm start` — start for production
+- `npm run check` — verify the database connection
+- `npm run populate` — reset and seed sample data
+- `npm test` — 83 tests on an in-memory MongoDB, no setup required
+- `npm run smoke` — boot the real API and assert 28 behaviours end to end
 
-### Database Migrations
-When adding new fields or tables:
-1. Update models in `models/` directory
-2. Delete existing database file (for development)
-3. Restart the application to recreate tables
+From `cattle-management-mobile`:
 
-## Contributing
+- `npx expo start` — run the app
+- `npx tsc --noEmit` — typecheck
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
+## Deployment
 
-## License
+`backend-mongo/render.yaml` deploys the API to [Render](https://render.com).
+Set `MONGODB_URI` in the Render dashboard rather than committing it. Then point
+the app at the deployed URL with `EXPO_PUBLIC_API_URL`.
 
-This project is licensed under the MIT License.
+For the app itself, `eas build --platform android --profile preview` produces an
+installable APK.
 
-## Support
+## Not built yet
 
-For support or questions, please create an issue in the repository.
+- Analytics charts (the data is already exposed by the API)
+- Authentication — the API is currently open, which is fine on a private
+  network but must be addressed before wider distribution
