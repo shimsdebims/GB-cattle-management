@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
+    "dev:local": "node scripts/dev-local.js",
     "populate": "node scripts/populate-mock-data.js",
     "check": "node scripts/check-connection.js",
     "smoke": "node scripts/smoke-test.js",
