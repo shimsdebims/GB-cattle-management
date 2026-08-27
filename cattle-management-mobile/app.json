@@ -34,7 +34,10 @@
       "bundler": "metro"
     },
     "extra": {
-      "apiUrl": null
+      "apiUrl": "https://gb-cattle-management.onrender.com/api",
+      "eas": {
+        "projectId": "fd13acdb-aeca-4acf-90ef-c3a4c3ed447c"
+      }
     },
     "plugins": [
       "@react-native-community/datetimepicker"
