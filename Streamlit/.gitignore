@@ -1,0 +1,13 @@
+# Ignore model artifacts and heavy files
+Model/
+*.pth
+*.pt
+*.ckpt
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtual envs
+venv/
+.env
