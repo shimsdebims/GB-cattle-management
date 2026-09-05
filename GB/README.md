@@ -51,6 +51,11 @@ A comprehensive web application for managing dairy cattle operations, tracking m
 - **Axios** for API communication
 - **Recharts** for additional charting
 
+Note about the Streamlit app
+- The Streamlit/crop-disease application is a separate utility (PyTorch-based image classifier) and is not required to run the cattle-management web application. It contains heavy machine learning dependencies (torch, torchvision) and a local model artifact.
+- If you wish to maintain the Streamlit app in its own repository, follow the steps documented in SEPARATE_STREAMLIT.md to extract and migrate it. This repository will continue to focus on the cattle-management web app (Flask backend + React frontend).
+- To run the cattle-management app without the Streamlit dependencies, only install backend dependencies from GB/backend/requirements.txt and frontend dependencies from GB/frontend/package.json (do not install Streamlit/requirements.txt unless you intend to run the Streamlit app).
+
 ## Installation
 
 ### Prerequisites
