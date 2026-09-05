@@ -20,10 +20,6 @@ expo-env.d.ts
 
 # macOS
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V5
-.Trashes
 
 # IDE
 .vscode/
@@ -36,3 +32,10 @@ expo-env.d.ts
 
 # TypeScript build info
 *.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Others
+Thumbs.db
