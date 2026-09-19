@@ -40,6 +40,18 @@ const client = axios.create({
   timeout: API_TIMEOUT_MS,
 });
 
+const apiKey = process.env.EXPO_PUBLIC_API_KEY;
+
+client.interceptors.request.use((config) => {
+  if (apiKey && !config.headers?.Authorization) {
+    config.headers = {
+      ...(config.headers ?? {}),
+      Authorization: `Bearer ${apiKey}`,
+    };
+  }
+  return config;
+});
+
 /**
  * A normalized error the UI can present directly.
  *
