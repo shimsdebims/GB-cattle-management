@@ -7,6 +7,35 @@ const morgan = require('morgan');
 
 const { errorHandler } = require('./middleware');
 
+function requireApiKey(req, res, next) {
+  const apiKey = process.env.API_KEY;
+
+  if (process.env.NODE_ENV === 'test') {
+    return next();
+  }
+
+  if (!apiKey) {
+    return res.status(500).json({
+      success: false,
+      error: 'Server Misconfiguration',
+      message: 'API_KEY is not configured.',
+    });
+  }
+
+  const authHeader = req.get('Authorization') || '';
+  const providedKey = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+
+  if (providedKey !== apiKey) {
+    return res.status(401).json({
+      success: false,
+      error: 'Unauthorized',
+      message: 'A valid bearer token is required.',
+    });
+  }
+
+  return next();
+}
+
 /**
  * Builds the Express app. Kept separate from `server.js` so tests can mount it
  * with supertest without opening a port or connecting to a database.
@@ -14,8 +43,19 @@ const { errorHandler } = require('./middleware');
 function createApp({ enableLogging = true } = {}) {
   const app = express();
 
+  const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:19006,http://localhost:3000').split(',').map((entry) => entry.trim()).filter(Boolean);
+
   app.use(helmet());
-  app.use(cors());
+  app.use(
+    cors({
+      origin(origin, callback) {
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.includes(origin)) return callback(null, true);
+        return callback(new Error('Not allowed by CORS'));
+      },
+      credentials: true,
+    })
+  );
 
   // 100kb is ample for these JSON payloads; the previous 10mb limit only widened
   // the surface for memory-exhaustion attempts.
@@ -57,6 +97,7 @@ function createApp({ enableLogging = true } = {}) {
     );
   }
 
+  app.use('/api', requireApiKey);
   app.use('/api/cattle', require('./routes/cattle'));
   app.use('/api/milk', require('./routes/milk'));
   app.use('/api/feeding', require('./routes/feeding'));
