@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "Cattle Management",
+    "slug": "cattle-management-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": false,
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0A1A23"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.shims.gbcattle"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0A1A23"
+      },
+      "package": "com.shims.gbcattle",
+      "edgeToEdgeEnabled": true
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "extra": {
+      "apiUrl": "https://gb-cattle-management.onrender.com/api",
+      "eas": {
+        "projectId": "fd13acdb-aeca-4acf-90ef-c3a4c3ed447c"
+      }
+    },
+    "plugins": [
+      "@react-native-community/datetimepicker"
+    ]
+  }
+}

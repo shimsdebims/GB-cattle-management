@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: gb-cattle-backend
+    env: node
+    plan: free
+    region: oregon
+    rootDir: .
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000           # Render sets PORT automatically; this is a fallback
+      - key: MONGODB_URI
+        sync: false           # Set manually in Render dashboard – never commit the real URI
