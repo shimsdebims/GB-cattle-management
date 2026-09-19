@@ -8,11 +8,13 @@ const morgan = require('morgan');
 const { errorHandler } = require('./middleware');
 
 function requireApiKey(req, res, next) {
-  const apiKey = process.env.API_KEY;
+  const enableAuth = process.env.ENABLE_API_AUTH === 'true';
 
-  if (process.env.NODE_ENV === 'test') {
+  if (!enableAuth || process.env.NODE_ENV === 'test') {
     return next();
   }
+
+  const apiKey = process.env.API_KEY;
 
   if (!apiKey) {
     return res.status(500).json({
