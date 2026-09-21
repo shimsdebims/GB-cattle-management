@@ -10,13 +10,27 @@ import {
   ChartData 
 } from '../types';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://gb-cattle-management.onrender.com/api';
+const API_KEY = process.env.REACT_APP_API_KEY;
 
 const api = axios.create({
   baseURL: API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },
+});
+
+api.interceptors.request.use((config) => {
+  if (API_KEY && !config.headers?.Authorization) {
+    const headers = config.headers ?? {};
+
+    config.headers = {
+      ...headers,
+      Authorization: `Bearer ${API_KEY}`,
+    } as typeof headers;
+  }
+
+  return config;
 });
 
 // Cattle API
