@@ -40,4 +40,18 @@ describe('API authentication', () => {
     expect(response.body.success).toBe(false);
     expect(response.body.error).toBe('Unauthorized');
   });
+
+  test('accepts proxied requests behind Render without x-forwarded-for errors', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.API_KEY = 'test-secret';
+    process.env.ALLOWED_ORIGINS = 'http://localhost:19006';
+    delete process.env.ENABLE_API_AUTH;
+
+    const app = createApp({ enableLogging: false });
+    const response = await request(app)
+      .get('/api/cattle')
+      .set('X-Forwarded-For', '203.0.113.42');
+
+    expect(response.status).not.toBe(400);
+  });
 });

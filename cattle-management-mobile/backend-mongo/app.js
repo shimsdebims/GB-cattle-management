@@ -45,6 +45,10 @@ function requireApiKey(req, res, next) {
 function createApp({ enableLogging = true } = {}) {
   const app = express();
 
+  // Render injects X-Forwarded-* headers; without this, express-rate-limit rejects
+  // proxied requests and the API fails with ERR_ERL_UNEXPECTED_X_FORWARDED_FOR.
+  app.set('trust proxy', 1);
+
   const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:19006,http://localhost:3000').split(',').map((entry) => entry.trim()).filter(Boolean);
 
   app.use(helmet());
