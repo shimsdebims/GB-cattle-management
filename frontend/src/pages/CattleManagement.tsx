@@ -16,6 +16,8 @@ import {
   IconButton,
   Chip,
   CardActions,
+  Snackbar,
+  Alert,
 } from '@mui/material';
 import { Add, Edit, Delete, Visibility } from '@mui/icons-material';
 import { cattleAPI } from '../services/api';
@@ -41,6 +43,7 @@ const CattleManagement: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingCattle, setEditingCattle] = useState<Cattle | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [formData, setFormData] = useState<CattleFormData>({
     tag_number: '',
     name: '',
@@ -66,6 +69,7 @@ const CattleManagement: React.FC = () => {
       setCattle(response.data);
     } catch (error) {
       console.error('Error fetching cattle:', error);
+      setSaveError('Unable to load cattle records right now. Please check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -113,6 +117,8 @@ const CattleManagement: React.FC = () => {
   };
 
   const handleSubmit = async () => {
+    setSaveError(null);
+
     try {
       if (editingCattle) {
         await cattleAPI.update(editingCattle.id, formData);
@@ -121,8 +127,10 @@ const CattleManagement: React.FC = () => {
       }
       await fetchCattle();
       handleCloseDialog();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving cattle:', error);
+      const message = error?.response?.data?.message || error?.message || 'The cattle record could not be saved.';
+      setSaveError(message);
     }
   };
 
@@ -415,6 +423,17 @@ const CattleManagement: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <Snackbar
+        open={Boolean(saveError)}
+        autoHideDuration={6000}
+        onClose={() => setSaveError(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity="error" onClose={() => setSaveError(null)} sx={{ width: '100%' }}>
+          {saveError}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 };

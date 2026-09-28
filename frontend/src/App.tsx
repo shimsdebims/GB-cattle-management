@@ -98,7 +98,11 @@ const menuItems = [
 
 function App() {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [desktopCollapsed, setDesktopCollapsed] = useState(false);
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+
+  const isSidebarVisible = isMobile ? mobileOpen : !desktopCollapsed;
+  const drawerPaperWidth = isSidebarVisible ? drawerWidth : 0;
 
   const drawerContent = (
     <Box sx={{ width: drawerWidth, maxWidth: '80vw' }}>
@@ -119,6 +123,15 @@ function App() {
     </Box>
   );
 
+  const toggleSidebar = () => {
+    if (isMobile) {
+      setMobileOpen((prev) => !prev);
+      return;
+    }
+
+    setDesktopCollapsed((prev) => !prev);
+  };
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
@@ -128,59 +141,44 @@ function App() {
             position="fixed"
             sx={{
               zIndex: (theme) => theme.zIndex.drawer + 1,
-              width: isMobile ? '100%' : `calc(100% - ${drawerWidth}px)`,
-              ml: isMobile ? 0 : `${drawerWidth}px`,
+              width: '100%',
+              ml: 0,
             }}
           >
             <Toolbar sx={{ minHeight: { xs: 62, md: 72 } }}>
-              {isMobile && (
-                <IconButton
-                  color="inherit"
-                  aria-label="open navigation"
-                  edge="start"
-                  onClick={() => setMobileOpen((prev) => !prev)}
-                  sx={{ mr: 2 }}
-                >
-                  {mobileOpen ? <CloseIcon /> : <MenuIcon />}
-                </IconButton>
-              )}
+              <IconButton
+                color="inherit"
+                aria-label="toggle navigation"
+                edge="start"
+                onClick={toggleSidebar}
+                sx={{ mr: 2 }}
+              >
+                {isMobile ? (mobileOpen ? <CloseIcon /> : <MenuIcon />) : <MenuIcon />}
+              </IconButton>
               <Typography variant="h6" noWrap component="div" sx={{ fontSize: { xs: '1rem', md: '1.25rem' } }}>
                 Dairy Cattle Management System
               </Typography>
             </Toolbar>
           </AppBar>
 
-          {isMobile ? (
-            <Drawer
-              variant="temporary"
-              open={mobileOpen}
-              onClose={() => setMobileOpen(false)}
-              ModalProps={{ keepMounted: true }}
-              sx={{
-                '& .MuiDrawer-paper': {
-                  boxSizing: 'border-box',
-                  width: drawerWidth,
-                },
-              }}
-            >
-              {drawerContent}
-            </Drawer>
-          ) : (
-            <Drawer
-              variant="permanent"
-              open
-              sx={{
-                width: drawerWidth,
-                flexShrink: 0,
-                '& .MuiDrawer-paper': {
-                  width: drawerWidth,
-                  boxSizing: 'border-box',
-                },
-              }}
-            >
-              {drawerContent}
-            </Drawer>
-          )}
+          <Drawer
+            variant={isMobile ? 'temporary' : 'permanent'}
+            open={isSidebarVisible}
+            onClose={() => setMobileOpen(false)}
+            ModalProps={{ keepMounted: true }}
+            sx={{
+              width: drawerPaperWidth,
+              flexShrink: 0,
+              '& .MuiDrawer-paper': {
+                width: drawerPaperWidth,
+                boxSizing: 'border-box',
+                overflow: 'hidden',
+                transition: 'width 0.2s ease',
+              },
+            }}
+          >
+            {drawerContent}
+          </Drawer>
 
           <Box
             component="main"
@@ -190,7 +188,7 @@ function App() {
               width: '100%',
               minHeight: '100vh',
               mt: { xs: 7, md: 0 },
-              ml: isMobile ? 0 : `${drawerWidth}px`,
+              ml: 0,
             }}
           >
             <Toolbar sx={{ display: { xs: 'none', md: 'block' } }} />
