@@ -184,11 +184,13 @@ function App() {
             component="main"
             sx={{
               flexGrow: 1,
-              p: { xs: 2, md: 3 },
+              p: { xs: 1.5, sm: 2, md: 3 },
               width: '100%',
+              maxWidth: '100vw',
               minHeight: '100vh',
               mt: { xs: 7, md: 0 },
               ml: 0,
+              overflowX: 'hidden',
             }}
           >
             <Toolbar sx={{ display: { xs: 'none', md: 'block' } }} />

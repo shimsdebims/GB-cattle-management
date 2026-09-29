@@ -19,6 +19,7 @@ import {
   Snackbar,
   Alert,
 } from '@mui/material';
+import useMediaQuery from '@mui/material/useMediaQuery';
 import { Add, Edit, Delete, Visibility } from '@mui/icons-material';
 import { cattleAPI } from '../services/api';
 import { Cattle } from '../types';
@@ -44,6 +45,7 @@ const CattleManagement: React.FC = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingCattle, setEditingCattle] = useState<Cattle | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const isMobile = useMediaQuery('(max-width: 768px)');
   const [formData, setFormData] = useState<CattleFormData>({
     tag_number: '',
     name: '',
@@ -176,15 +178,29 @@ const CattleManagement: React.FC = () => {
 
   return (
     <Box>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4">
+      <Box
+        display="flex"
+        justifyContent="space-between"
+        alignItems="center"
+        mb={3}
+        sx={{
+          flexDirection: { xs: 'column', sm: 'row' },
+          alignItems: { xs: 'flex-start', sm: 'center' },
+          gap: { xs: 1.5, sm: 0 },
+        }}
+      >
+        <Typography variant="h4" sx={{ fontSize: { xs: '1.8rem', md: '2.2rem' } }}>
           Cattle Management
         </Typography>
         <Button
           variant="contained"
           startIcon={<Add />}
           onClick={() => handleOpenDialog()}
-          sx={{ borderRadius: 2 }}
+          sx={{
+            borderRadius: 2,
+            width: { xs: '100%', sm: 'auto' },
+            alignSelf: { xs: 'stretch', sm: 'auto' },
+          }}
         >
           Add New Cattle
         </Button>
@@ -193,7 +209,7 @@ const CattleManagement: React.FC = () => {
       <Grid container spacing={3}>
         {cattle.map((cow) => (
           <Grid item xs={12} sm={6} md={4} key={cow.id}>
-            <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+            <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 220 }}>
               <CardContent sx={{ flexGrow: 1 }}>
                 <Box display="flex" justifyContent="space-between" alignItems="start" mb={2}>
                   <Typography variant="h6" sx={{ color: '#00ED64' }}>
@@ -266,17 +282,20 @@ const CattleManagement: React.FC = () => {
         onClose={handleCloseDialog}
         maxWidth="md"
         fullWidth
+        fullScreen={isMobile}
         PaperProps={{
           sx: {
             backgroundColor: '#00374A',
             border: '1px solid #394F56',
+            maxHeight: '95vh',
+            overflow: 'hidden',
           }
         }}
       >
         <DialogTitle sx={{ color: '#FFFFFF' }}>
           {editingCattle ? 'Edit Cattle' : 'Add New Cattle'}
         </DialogTitle>
-        <DialogContent>
+        <DialogContent sx={{ p: { xs: 2, sm: 3 }, overflowY: 'auto' }}>
           <Grid container spacing={2} sx={{ mt: 1 }}>
             <Grid item xs={12} sm={6}>
               <TextField
@@ -414,11 +433,11 @@ const CattleManagement: React.FC = () => {
             </Grid>
           </Grid>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCloseDialog} sx={{ color: '#C1C7CD' }}>
+        <DialogActions sx={{ p: { xs: 2, sm: 3 }, pt: 0, display: 'flex', gap: 1, flexDirection: { xs: 'column-reverse', sm: 'row' } }}>
+          <Button onClick={handleCloseDialog} sx={{ color: '#C1C7CD', width: { xs: '100%', sm: 'auto' } }}>
             Cancel
           </Button>
-          <Button onClick={handleSubmit} variant="contained">
+          <Button onClick={handleSubmit} variant="contained" sx={{ width: { xs: '100%', sm: 'auto' } }}>
             {editingCattle ? 'Update' : 'Create'}
           </Button>
         </DialogActions>
