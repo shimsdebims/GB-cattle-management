@@ -87,6 +87,44 @@ Seven tabs:
 - **Monthly** — cow × day yield grid, mirroring the farm's spreadsheet
 - **Analytics** — not built yet; links to the reports above
 
+## Operations
+
+### Login
+
+Login ships **off** so installed apps keep working. To switch it on:
+
+1. In Render, set `AUTH_SECRET` (32+ random characters), `ADMIN_USERNAME` and
+   `ADMIN_PASSWORD`. The owner account is created on the next boot.
+2. Ship the app versions that have the login screen (Android update, web deploy).
+3. Set `AUTH_REQUIRED=true` in Render.
+
+Reset a password (logs out every device):
+`npm run create-user -- <username> <new-password>` with `MONGODB_URI` set.
+
+### Backups
+
+`.github/workflows/backup.yml` exports every collection nightly at 03:15
+Bujumbura time, encrypted with AES-256-GCM, kept 90 days as a workflow artifact.
+
+1. Add the repository secrets `MONGODB_URI` and `BACKUP_PASSPHRASE` (16+
+   characters, kept in a password manager: backups are useless without it).
+2. Run the workflow once by hand (Actions → Nightly backup → Run workflow).
+3. Test a restore into an empty scratch database:
+
+```bash
+RESTORE_URI=<scratch db> BACKUP_PASSPHRASE=… npm run restore -- gb-backup-….json.enc          # dry run
+RESTORE_URI=<scratch db> BACKUP_PASSPHRASE=… npm run restore -- gb-backup-….json.enc --apply
+```
+
+`restore` never reads `MONGODB_URI` and refuses a non-empty target unless
+`--replace` is given.
+
+### CI
+
+`.github/workflows/ci.yml` runs the API tests, the app typecheck and the web
+build on every push and pull request. `npm run test:unit` runs the tests that
+need no database.
+
 ## Domain rules worth knowing
 
 These are deliberate and enforced by the API:
@@ -94,6 +132,12 @@ These are deliberate and enforced by the API:
 - **Milk income is derived, never entered.** Revenue = litres recorded × the
   price per litre in Settings. Recording milk as manual revenue would
   double-count it, so `Milk Sales` is not an accepted revenue source.
+- **Milk is valued at the price in force that day.** The price has a history
+  (Settings → price, with a start date). Each record stores its day's price, so
+  a price change never revalues past income.
+- **Animals with records are archived, never deleted.** Selling records the
+  date, price and buyer, books the sale as income linked to the animal, and
+  moves it to the Archive. Delete works only for an animal with no records.
 - **One milk record per cow per calendar day.** Enforced by a unique index, so
   double entry is rejected rather than silently doubling a day's total.
 - **Dates are calendar dates** (`YYYY-MM-DD`), stored at UTC midnight. Sending a
@@ -148,5 +192,4 @@ installable APK.
 ## Not built yet
 
 - Analytics charts (the data is already exposed by the API)
-- Authentication — the API is currently open, which is fine on a private
-  network but must be addressed before wider distribution
+- Roles beyond a single owner (the user model has a `role` field ready)

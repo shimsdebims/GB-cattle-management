@@ -1,0 +1,46 @@
+name: Nightly backup
+
+# 01:15 UTC = 03:15 in Bujumbura, when nobody is entering data.
+on:
+  schedule:
+    - cron: '15 1 * * *'
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cattle-management-mobile/backend-mongo
+    steps:
+      - name: Check secrets are configured
+        id: secrets
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          if [ -z "$MONGODB_URI" ] || [ -z "$BACKUP_PASSPHRASE" ]; then
+            echo "::error::Set the MONGODB_URI and BACKUP_PASSPHRASE repository secrets."
+            exit 1
+          fi
+        working-directory: .
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: cattle-management-mobile/backend-mongo/package-lock.json
+      - run: npm ci --omit=dev
+      - name: Export and encrypt
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: node scripts/backup.js ../../backups
+      # Encrypted with BACKUP_PASSPHRASE, so the file is unreadable without it
+      # even though artifacts of a public repo can be downloaded.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gb-backup-${{ github.run_id }}
+          path: backups/*.json.enc
+          retention-days: 90
+          if-no-files-found: error
