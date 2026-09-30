@@ -25,6 +25,12 @@ const milkProductionSchema = new mongoose.Schema({
     min: LIMITS.QUALITY_SCORE_MIN,
     max: LIMITS.QUALITY_SCORE_MAX,
   },
+  // Price in force on date_recorded, stored so later price changes never
+  // revalue past income. Set by the route from the price history.
+  price_per_liter: {
+    type: Number,
+    min: 0,
+  },
   notes: {
     type: String,
     trim: true,

@@ -6,43 +6,20 @@ const rateLimit = require('express-rate-limit');
 const morgan = require('morgan');
 
 const { errorHandler } = require('./middleware');
-
-function requireApiKey(req, res, next) {
-  const enableAuth = process.env.ENABLE_API_AUTH === 'true';
-
-  if (!enableAuth || process.env.NODE_ENV === 'test') {
-    return next();
-  }
-
-  const apiKey = process.env.API_KEY;
-
-  if (!apiKey) {
-    return res.status(500).json({
-      success: false,
-      error: 'Server Misconfiguration',
-      message: 'API_KEY is not configured.',
-    });
-  }
-
-  const authHeader = req.get('Authorization') || '';
-  const providedKey = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
-
-  if (providedKey !== apiKey) {
-    return res.status(401).json({
-      success: false,
-      error: 'Unauthorized',
-      message: 'A valid bearer token is required.',
-    });
-  }
-
-  return next();
-}
+const { authMiddleware } = require('./middleware/auth');
+const auth = require('./routes/auth');
 
 /**
  * Builds the Express app. Kept separate from `server.js` so tests can mount it
  * with supertest without opening a port or connecting to a database.
+ *
+ * `requireAuth` defaults to AUTH_REQUIRED=true. It stays off until both apps
+ * ship a login screen, then is switched on in the Render dashboard.
  */
-function createApp({ enableLogging = true } = {}) {
+function createApp({
+  enableLogging = true,
+  requireAuth = process.env.AUTH_REQUIRED === 'true',
+} = {}) {
   const app = express();
 
   // Render injects X-Forwarded-* headers; without this, express-rate-limit rejects
@@ -121,7 +98,11 @@ function createApp({ enableLogging = true } = {}) {
     );
   }
 
-  app.use('/api', requireApiKey);
+  // Public: logging in. Everything registered after the guard needs a token.
+  app.use('/api/auth', auth.router);
+  app.use('/api', authMiddleware({ required: requireAuth }));
+  app.get('/api/auth/me', auth.me);
+  app.post('/api/auth/change-password', auth.changePassword);
   app.use('/api/cattle', require('./routes/cattle'));
   app.use('/api/milk', require('./routes/milk'));
   app.use('/api/feeding', require('./routes/feeding'));

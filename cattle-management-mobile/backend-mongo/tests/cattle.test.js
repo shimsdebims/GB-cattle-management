@@ -271,27 +271,7 @@ describe('PUT /api/cattle/:id', () => {
 });
 
 describe('DELETE /api/cattle/:id', () => {
-  test('removes the animal and cascades to its records', async () => {
-    const cattle = await Cattle.create(cattlePayload());
-    await MilkProduction.create(milkPayload(cattle._id));
-    await Feeding.create({
-      cattle_id: cattle._id,
-      date_recorded: '2026-07-01',
-      feed_type: 'Hay',
-      quantity_kg: 5,
-    });
-
-    const res = await request(app).delete(`/api/cattle/${cattle._id}`);
-
-    expect(res.status).toBe(200);
-    expect(res.body.data.deleted_milk_records).toBe(1);
-    expect(res.body.data.deleted_feeding_records).toBe(1);
-
-    expect(await Cattle.countDocuments()).toBe(0);
-    expect(await MilkProduction.countDocuments()).toBe(0);
-    expect(await Feeding.countDocuments()).toBe(0);
-  });
-
+  // Cascading deletes were removed: see archive.test.js for the guard.
   test('404s for an unknown id', async () => {
     const res = await request(app).delete(
       `/api/cattle/${new mongoose.Types.ObjectId()}`

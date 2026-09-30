@@ -2,6 +2,8 @@ require('dotenv').config();
 
 const { createApp } = require('./app');
 const db = require('./db');
+const { ensurePriceHistory } = require('./utils/pricing');
+const { bootstrapOwner } = require('./routes/auth');
 
 const PORT = process.env.PORT || 8080;
 
@@ -12,6 +14,8 @@ const MODELS = [
   require('./models/Expense'),
   require('./models/Revenue'),
   require('./models/Settings'),
+  require('./models/MilkPrice'),
+  require('./models/User'),
 ];
 
 async function start() {
@@ -22,6 +26,23 @@ async function start() {
 
   if (connected) {
     await db.syncIndexes(MODELS);
+
+    // One-off, idempotent: pin today's price on records saved before prices
+    // were stored, so the first price change cannot revalue them.
+    const priced = await ensurePriceHistory().catch((error) => {
+      console.error('Price history migration failed:', error.message);
+      return 0;
+    });
+    if (priced > 0) console.log(`💰  Stored the milk price on ${priced} existing records`);
+
+    await bootstrapOwner({
+      username: process.env.ADMIN_USERNAME,
+      password: process.env.ADMIN_PASSWORD,
+    }).catch((error) => console.error('Owner bootstrap failed:', error.message));
+  }
+
+  if (process.env.AUTH_REQUIRED === 'true' && !process.env.AUTH_SECRET) {
+    console.error('⚠️  AUTH_REQUIRED=true but AUTH_SECRET is not set: every request will fail.');
   }
 
   const app = createApp();

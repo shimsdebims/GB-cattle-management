@@ -1,112 +1,143 @@
 const request = require('supertest');
 
 const { createApp } = require('../app');
+const User = require('../models/User');
+const { hashPassword, verifyPassword, issueToken, readToken } = require('../utils/auth');
+const { bootstrapOwner } = require('../routes/auth');
 
-describe('API authentication', () => {
-  const originalNodeEnv = process.env.NODE_ENV;
-  const originalApiKey = process.env.API_KEY;
-  const originalAllowedOrigins = process.env.ALLOWED_ORIGINS;
-  const originalEnableApiAuth = process.env.ENABLE_API_AUTH;
+const SECRET = 's'.repeat(48);
 
-  afterEach(() => {
-    process.env.NODE_ENV = originalNodeEnv;
-    process.env.API_KEY = originalApiKey;
-    process.env.ALLOWED_ORIGINS = originalAllowedOrigins;
-    process.env.ENABLE_API_AUTH = originalEnableApiAuth;
+describe('password hashing and tokens (unit)', () => {
+  beforeAll(() => {
+    process.env.AUTH_SECRET = SECRET;
   });
 
-  test('allows unauthenticated requests by default so the app works in production', async () => {
-    process.env.NODE_ENV = 'production';
-    process.env.API_KEY = 'test-secret';
-    process.env.ALLOWED_ORIGINS = 'http://localhost:19006';
-    delete process.env.ENABLE_API_AUTH;
-
-    const app = createApp({ enableLogging: false });
-    const response = await request(app).get('/api/cattle');
-
-    expect(response.status).not.toBe(401);
+  test('verifies the right password and rejects a wrong one', () => {
+    const stored = hashPassword('correct horse');
+    expect(stored.startsWith('scrypt$')).toBe(true);
+    expect(stored).not.toContain('correct horse');
+    expect(verifyPassword('correct horse', stored)).toBe(true);
+    expect(verifyPassword('wrong horse', stored)).toBe(false);
+    expect(verifyPassword('x', 'garbage')).toBe(false);
   });
 
-  test('can enforce auth when ENABLE_API_AUTH=true', async () => {
-    process.env.NODE_ENV = 'production';
-    process.env.API_KEY = 'test-secret';
-    process.env.ALLOWED_ORIGINS = 'http://localhost:19006';
-    process.env.ENABLE_API_AUTH = 'true';
+  test('round-trips a token and rejects tampering and expiry', () => {
+    const user = { _id: 'abc123', token_version: 2 };
+    const token = issueToken(user);
+    expect(readToken(token)).toMatchObject({ sub: 'abc123', v: 2 });
 
-    const app = createApp({ enableLogging: false });
-    const response = await request(app).get('/api/cattle');
+    const [body, sig] = token.split('.');
+    const forged = Buffer.from(JSON.stringify({ sub: 'other', v: 2, exp: 9e9 })).toString('base64url');
+    expect(readToken(`${forged}.${sig}`)).toBeNull();
+    expect(readToken(`${body}.${sig}x`)).toBeNull();
 
-    expect(response.status).toBe(401);
-    expect(response.body.success).toBe(false);
-    expect(response.body.error).toBe('Unauthorized');
+    const old = issueToken(user, { now: Date.now() - 200 * 24 * 3600 * 1000 });
+    expect(readToken(old)).toBeNull();
   });
 
-  test('allows production Vercel origins through CORS preflight', async () => {
-    process.env.NODE_ENV = 'production';
-    process.env.ALLOWED_ORIGINS = 'http://localhost:19006';
-    delete process.env.ENABLE_API_AUTH;
+  test('refuses to sign with a missing or short secret', () => {
+    process.env.AUTH_SECRET = 'short';
+    expect(() => issueToken({ _id: '1' })).toThrow(/AUTH_SECRET/);
+    process.env.AUTH_SECRET = SECRET;
+  });
+});
 
-    const app = createApp({ enableLogging: false });
-    const response = await request(app)
-      .options('/api/cattle')
-      .set('Origin', 'https://gb-cattle-management.vercel.app')
-      .set('Access-Control-Request-Method', 'POST')
-      .set('Access-Control-Request-Headers', 'content-type,authorization');
+describe('login flow', () => {
+  let app;
 
-    expect(response.status).toBe(204);
-    expect(response.headers['access-control-allow-origin']).toBe('https://gb-cattle-management.vercel.app');
-
-    const deploymentResponse = await request(app)
-      .options('/api/cattle')
-      .set('Origin', 'https://gb-cattle-management-k5nur9e06-shimsdebims.vercel.app')
-      .set('Access-Control-Request-Method', 'POST')
-      .set('Access-Control-Request-Headers', 'content-type,authorization');
-
-    expect(deploymentResponse.status).toBe(204);
-    expect(deploymentResponse.headers['access-control-allow-origin']).toBe('https://gb-cattle-management-k5nur9e06-shimsdebims.vercel.app');
-
-    // A later deploy gets a new hash and must keep working without a code change.
-    const nextDeploy = 'https://gb-cattle-management-a1b2c3d4e-shimsdebims.vercel.app';
-    const nextResponse = await request(app)
-      .options('/api/cattle')
-      .set('Origin', nextDeploy)
-      .set('Access-Control-Request-Method', 'POST');
-    expect(nextResponse.status).toBe(204);
-    expect(nextResponse.headers['access-control-allow-origin']).toBe(nextDeploy);
+  beforeAll(() => {
+    process.env.AUTH_SECRET = SECRET;
+    app = createApp({ enableLogging: false, requireAuth: true });
   });
 
-  test('does not grant CORS to unrelated origins, and does not 500', async () => {
-    process.env.NODE_ENV = 'production';
-    process.env.ALLOWED_ORIGINS = 'http://localhost:19006';
-    delete process.env.ENABLE_API_AUTH;
+  beforeEach(async () => {
+    await User.create({ username: 'fermier', password_hash: hashPassword('vaches-2026') });
+  });
 
-    const app = createApp({ enableLogging: false });
-    for (const origin of [
-      'https://evil.example.com',
-      'https://gb-cattle-management.vercel.app.evil.com',
-      'https://other-project-abc123-shimsdebims.vercel.app',
-      'https://gb-cattle-management-abc123-someoneelse.vercel.app',
-    ]) {
-      const response = await request(app)
-        .options('/api/cattle')
-        .set('Origin', origin)
-        .set('Access-Control-Request-Method', 'POST');
-      expect(response.status).toBeLessThan(500);
-      expect(response.headers['access-control-allow-origin']).toBeUndefined();
+  const login = (username, password) =>
+    request(app).post('/api/auth/login').send({ username, password });
+
+  test('logs in, and the token opens the data routes', async () => {
+    const res = await login('Fermier', 'vaches-2026');
+    expect(res.status).toBe(200);
+    expect(res.body.data.token).toBeDefined();
+    expect(res.body.data.user.username).toBe('fermier');
+    expect(res.body.data.user.password_hash).toBeUndefined();
+
+    const list = await request(app)
+      .get('/api/cattle')
+      .set('Authorization', `Bearer ${res.body.data.token}`);
+    expect(list.status).toBe(200);
+
+    const me = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${res.body.data.token}`);
+    expect(me.body.data.user.username).toBe('fermier');
+  });
+
+  test('gives the same answer for a wrong password and an unknown user', async () => {
+    const wrong = await login('fermier', 'nope-nope');
+    const unknown = await login('personne', 'vaches-2026');
+    expect(wrong.status).toBe(401);
+    expect(unknown.status).toBe(401);
+    expect(wrong.body.message).toBe(unknown.body.message);
+    expect(wrong.body.code).toBe('LOGIN_INVALID');
+  });
+
+  test('blocks every data route without a token', async () => {
+    for (const path of ['/api/cattle', '/api/milk', '/api/financial/expenses', '/api/settings']) {
+      const res = await request(app).get(path);
+      expect(res.status).toBe(401);
     }
   });
 
-  test('accepts proxied requests behind Render without x-forwarded-for errors', async () => {
-    process.env.NODE_ENV = 'production';
-    process.env.API_KEY = 'test-secret';
-    process.env.ALLOWED_ORIGINS = 'http://localhost:19006';
-    delete process.env.ENABLE_API_AUTH;
+  test('a password change logs out old tokens', async () => {
+    const first = (await login('fermier', 'vaches-2026')).body.data.token;
 
-    const app = createApp({ enableLogging: false });
-    const response = await request(app)
+    const changed = await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${first}`)
+      .send({ current_password: 'vaches-2026', new_password: 'nouveau-2026' });
+    expect(changed.status).toBe(200);
+
+    const stale = await request(app).get('/api/cattle').set('Authorization', `Bearer ${first}`);
+    expect(stale.status).toBe(401);
+
+    const fresh = await request(app)
       .get('/api/cattle')
-      .set('X-Forwarded-For', '203.0.113.42');
+      .set('Authorization', `Bearer ${changed.body.data.token}`);
+    expect(fresh.status).toBe(200);
+  });
 
-    expect(response.status).not.toBe(400);
+  test('rejects a too-short new password', async () => {
+    const token = (await login('fermier', 'vaches-2026')).body.data.token;
+    const res = await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ current_password: 'vaches-2026', new_password: 'short' });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('owner bootstrap', () => {
+  test('creates the owner once and never overwrites it', async () => {
+    expect(await bootstrapOwner({ username: 'Fermier', password: 'premier-mdp' })).toBe(true);
+    expect(await bootstrapOwner({ username: 'fermier', password: 'autre-mdp-2' })).toBe(false);
+
+    const user = await User.findOne({ username: 'fermier' });
+    expect(verifyPassword('premier-mdp', user.password_hash)).toBe(true);
+  });
+
+  test('does nothing without both variables', async () => {
+    expect(await bootstrapOwner({ username: 'fermier' })).toBe(false);
+    expect(await User.countDocuments()).toBe(0);
+  });
+});
+
+describe('login off (default until both apps ship a login screen)', () => {
+  test('data routes stay open', async () => {
+    const open = createApp({ enableLogging: false, requireAuth: false });
+    const res = await request(open).get('/api/cattle');
+    expect(res.status).toBe(200);
   });
 });

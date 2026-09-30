@@ -256,6 +256,17 @@ const validateSettings = (data, { partial = true } = {}) => {
   const errors = [];
   checkNumber(errors, data, 'milk_price_per_liter', { min: 0, partial });
   checkString(errors, data, 'currency', { min: 1, max: 10, partial });
+  // A price change may be scheduled ahead, so the future is allowed here.
+  checkDate(errors, data, 'effective_from', { allowFuture: true, partial });
+  return result(errors);
+};
+
+const validateSale = (data) => {
+  const errors = [];
+  checkDate(errors, data, 'sale_date', { required: true });
+  checkNumber(errors, data, 'sale_price', { required: true, min: 0 });
+  checkString(errors, data, 'buyer', { max: LIMITS.NAME_MAX });
+  checkString(errors, data, 'notes', { max: LIMITS.NOTES_MAX });
   return result(errors);
 };
 
@@ -266,6 +277,7 @@ const VALIDATORS = {
   expense: validateExpense,
   revenue: validateRevenue,
   settings: validateSettings,
+  sale: validateSale,
 };
 
 // ─── Express middleware ──────────────────────────────────────────────────────
@@ -356,6 +368,7 @@ const errorHandler = (err, req, res, next) => { // eslint-disable-line no-unused
   return res.status(status).json({
     success: false,
     error: err.expose && err.error ? err.error : 'Internal Server Error',
+    ...(err.expose && err.code && { code: err.code }),
     ...(err.expose && err.message && { message: err.message }),
     ...(!err.expose &&
       process.env.NODE_ENV === 'development' && { message: err.message }),
@@ -370,6 +383,7 @@ module.exports = {
   validateExpense,
   validateRevenue,
   validateSettings,
+  validateSale,
   validationMiddleware,
   validateIdParam,
   errorHandler,

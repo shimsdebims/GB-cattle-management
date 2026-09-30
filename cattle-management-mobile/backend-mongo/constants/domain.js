@@ -26,6 +26,9 @@ const HEALTH_STATUSES = ['Healthy', 'Sick', 'Injured', 'Pregnant', 'Recovering']
 
 const CATTLE_STATUSES = ['Active', 'Sold', 'Deceased', 'Quarantined'];
 
+// Statuses that move a cow to the archive: hidden by default, history kept.
+const ARCHIVED_STATUSES = ['Sold', 'Deceased'];
+
 const FEED_TYPES = [
   'Hay',
   'Corn Silage',
@@ -83,6 +86,9 @@ const LIMITS = {
   FEED_QUANTITY_MAX: 5000,
   PAGE_SIZE_DEFAULT: 50,
   PAGE_SIZE_MAX: 200,
+  PASSWORD_MIN: 8,
+  USERNAME_MIN: 3,
+  USERNAME_MAX: 40,
 };
 
 const DEFAULTS = {
@@ -95,6 +101,7 @@ module.exports = {
   GENDERS,
   HEALTH_STATUSES,
   CATTLE_STATUSES,
+  ARCHIVED_STATUSES,
   FEED_TYPES,
   EXPENSE_CATEGORIES,
   REVENUE_SOURCES,

@@ -20,6 +20,7 @@ const {
   round1,
   roundInt,
 } = require('../utils/dates');
+const { incomeExpr } = require('../utils/pricing');
 
 /**
  * GET /api/analytics/dashboard
@@ -39,13 +40,16 @@ router.get(
     const startDate = daysAgo(days);
     const periodMatch = { $match: { date_recorded: { $gte: startDate } } };
 
+    // Needed first: records saved before prices were stored fall back to it.
+    const settings = await Settings.getSingleton();
+    const milkPrice = settings.milk_price_per_liter;
+
     const [
       cattleStats,
       milkStats,
       expenseStats,
       revenueStats,
       feedingStats,
-      settings,
     ] = await Promise.all([
       Cattle.aggregate([
         {
@@ -70,6 +74,7 @@ router.get(
           $group: {
             _id: null,
             total_milk: { $sum: '$quantity_liters' },
+            milk_income: { $sum: incomeExpr(milkPrice) },
             average_quality: { $avg: '$quality_score' },
             production_records: { $sum: 1 },
             // Distinct recording days give a truthful daily average.
@@ -79,6 +84,7 @@ router.get(
         {
           $project: {
             total_milk: 1,
+            milk_income: 1,
             average_quality: 1,
             production_records: 1,
             recording_day_count: { $size: '$recording_days' },
@@ -103,7 +109,6 @@ router.get(
           },
         },
       ]),
-      Settings.getSingleton(),
     ]);
 
     const cattle = cattleStats[0] || {
@@ -119,10 +124,10 @@ router.get(
       recording_day_count: 0,
     };
 
-    const milkPrice = settings.milk_price_per_liter;
     const totalMilk = milk.total_milk || 0;
 
-    const milk_revenue = roundInt(totalMilk * milkPrice);
+    // Each day at the price in force that day (see utils/pricing.js).
+    const milk_revenue = roundInt(milk.milk_income || 0);
     const other_revenue = revenueStats[0]?.total_other_revenue || 0;
     const total_expenses = expenseStats[0]?.total_expenses || 0;
     const total_revenue = milk_revenue + other_revenue;
@@ -302,6 +307,7 @@ router.get(
         $group: {
           _id: '$cattle_id',
           total_liters: { $sum: '$quantity_liters' },
+          income: { $sum: incomeExpr(milkPrice) },
           record_count: { $sum: 1 },
         },
       },
@@ -324,6 +330,7 @@ router.get(
           name: { $ifNull: ['$cattle_info.name', 'Unknown'] },
           tag: { $ifNull: ['$cattle_info.tag_number', '—'] },
           total_liters: 1,
+          income: 1,
           record_count: 1,
         },
       },
@@ -335,12 +342,12 @@ router.get(
       name: c.name,
       tag: c.tag,
       total_liters: round1(c.total_liters),
-      income: roundInt(c.total_liters * milkPrice),
+      income: roundInt(c.income),
       record_count: c.record_count,
     }));
 
     const total_liters = cows.reduce((sum, c) => sum + c.total_liters, 0);
-    const total_income = roundInt(total_liters * milkPrice);
+    const total_income = roundInt(perCow.reduce((sum, c) => sum + c.income, 0));
 
     return ok(res, {
       month,

@@ -67,6 +67,23 @@ const cattleSchema = new mongoose.Schema({
     default: 'Active',
     enum: CATTLE_STATUSES,
   },
+  // Filled by POST /api/cattle/:id/sell. The sale income itself is a Revenue
+  // record linked by cattle_id, so it shows up in the farm's accounts.
+  sale_date: {
+    type: Date,
+  },
+  sale_price: {
+    type: Number,
+    min: 0,
+  },
+  buyer: {
+    type: String,
+    trim: true,
+    maxlength: LIMITS.NAME_MAX,
+  },
+  deceased_date: {
+    type: Date,
+  },
   notes: {
     type: String,
     trim: true,

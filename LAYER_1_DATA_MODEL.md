@@ -24,10 +24,10 @@ This document defines the **clean, minimal data schema** for the MVP. Everything
 ### Connection String
 ```
 MongoDB Connection:
-mongodb+srv://shimasarah777:[PASSWORD]@cluster0.mongodb.net/cattle-management
+mongodb+srv://<USER>:<PASSWORD>@<CLUSTER>.mongodb.net/cattle-management
 
 Environment File (.env):
-MONGODB_URI=mongodb+srv://shimasarah777:45eDkKiSS5ubnP6Y@cluster0.mongodb.net/cattle-management
+MONGODB_URI=mongodb+srv://<USER>:<PASSWORD>@<CLUSTER>.mongodb.net/cattle-management   # never commit the real value
 DATABASE_NAME=cattle-management
 NODE_ENV=development
 PORT=8080

@@ -27,6 +27,11 @@ const revenueSchema = new mongoose.Schema({
     required: true,
     min: 0
   },
+  // Set for a cattle sale, so the cow's card can show what it sold for.
+  cattle_id: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Cattle',
+  },
   notes: {
     type: String,
     trim: true,
@@ -39,5 +44,6 @@ const revenueSchema = new mongoose.Schema({
 // Indexes
 revenueSchema.index({ date_recorded: -1 });
 revenueSchema.index({ source: 1, date_recorded: -1 });
+revenueSchema.index({ cattle_id: 1 }, { sparse: true });
 
 module.exports = mongoose.model('Revenue', revenueSchema);

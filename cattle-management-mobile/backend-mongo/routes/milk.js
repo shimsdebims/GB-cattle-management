@@ -17,6 +17,7 @@ const {
   validateIdParam,
 } = require('../middleware');
 const { isValidMonth, utcMonthRange, daysAgo, round1 } = require('../utils/dates');
+const { priceOn } = require('../utils/pricing');
 
 // ─── Collection routes ───────────────────────────────────────────────────────
 
@@ -236,6 +237,8 @@ router.post(
       quantity_liters,
       quality_score,
       notes,
+      // Valued at the price in force that day, and kept even if the price changes.
+      price_per_liter: await priceOn(date_recorded),
     });
 
     await record.populate('cattle_id', 'tag_number name breed');
@@ -249,7 +252,11 @@ router.put(
   validateIdParam(),
   validationMiddleware('milkProduction', { partial: true }),
   asyncHandler(async (req, res) => {
-    const record = await MilkProduction.findByIdAndUpdate(req.params.id, req.body, {
+    // The price is server-controlled; a moved date takes that day's price.
+    const { price_per_liter, ...update } = req.body; // eslint-disable-line no-unused-vars
+    if (update.date_recorded) update.price_per_liter = await priceOn(update.date_recorded);
+
+    const record = await MilkProduction.findByIdAndUpdate(req.params.id, update, {
       new: true,
       runValidators: true,
     }).populate('cattle_id', 'tag_number name breed');

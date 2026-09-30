@@ -18,6 +18,8 @@ require('../models/Feeding');
 require('../models/Expense');
 require('../models/Revenue');
 require('../models/Settings');
+require('../models/MilkPrice');
+require('../models/User');
 
 let memoryServer;
 
