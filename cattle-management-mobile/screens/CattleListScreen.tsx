@@ -23,6 +23,11 @@ import type { RootStackParamList } from '../navigation/AppNavigator';
 
 type Nav = StackNavigationProp<RootStackParamList>;
 
+const ARCHIVED: CattleStatus[] = ['Sold', 'Deceased'];
+const FILTER_GROUPS = ['Herd', 'Archive', 'All'] as const;
+type HerdFilter = (typeof FILTER_GROUPS)[number] | CattleStatus;
+const FILTERS: HerdFilter[] = ['Herd', 'Archive', 'All', ...CATTLE_STATUSES.filter((st) => !ARCHIVED.includes(st))];
+
 const CattleListScreen = () => {
   const navigation = useNavigation<Nav>();
   const { forceSync } = useOfflineAPI();
@@ -31,7 +36,8 @@ const CattleListScreen = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<CattleStatus | 'All'>('All');
+  // Default view is the working herd; sold and dead animals live in the Archive.
+  const [statusFilter, setStatusFilter] = useState<HerdFilter>('Herd');
 
   const load = useCallback(async () => {
     try {
@@ -56,7 +62,12 @@ const CattleListScreen = () => {
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
     return herd.filter((cow) => {
-      if (statusFilter !== 'All' && cow.current_status !== statusFilter) return false;
+      const archived = ARCHIVED.includes(cow.current_status);
+      if (statusFilter === 'Herd' && archived) return false;
+      if (statusFilter === 'Archive' && !archived) return false;
+      if (!FILTER_GROUPS.includes(statusFilter as never) && cow.current_status !== statusFilter) {
+        return false;
+      }
       if (!term) return true;
       return (
         cow.name.toLowerCase().includes(term) ||
@@ -135,7 +146,7 @@ const CattleListScreen = () => {
         style={styles.filterScroll}
         contentContainerStyle={styles.filterRow}
       >
-        {(['All', ...CATTLE_STATUSES] as const).map((status) => (
+        {FILTERS.map((status) => (
           <TouchableOpacity
             key={status}
             style={[styles.filter, statusFilter === status && styles.filterActive]}

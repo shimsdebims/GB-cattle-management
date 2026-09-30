@@ -1,4 +1,5 @@
 import React from 'react';
+import { ActivityIndicator, View } from 'react-native';
 import { NavigationContainer, NavigatorScreenParams } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
@@ -17,6 +18,8 @@ import FinancialScreen from '../screens/FinancialScreen';
 import AnalyticsScreen from '../screens/AnalyticsScreen';
 import MonthlyReportScreen from '../screens/MonthlyReportScreen';
 import SettingsScreen from '../screens/SettingsScreen';
+import LoginScreen from '../screens/LoginScreen';
+import { useAuthState } from '../hooks/useAuth';
 
 export type MainTabParamList = {
   Dashboard: undefined;
@@ -97,6 +100,21 @@ const MainTabs = () => {
 };
 
 const AppNavigator = () => {
+  const { status } = useAuthState();
+
+  if (status === 'checking') {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background, justifyContent: 'center' }}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
+  // Logged out (or session expired): only the login screen is reachable.
+  if (status === 'signedOut') {
+    return <LoginScreen />;
+  }
+
   return (
     <NavigationContainer>
       <Stack.Navigator

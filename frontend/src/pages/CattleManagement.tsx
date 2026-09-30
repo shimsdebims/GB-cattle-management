@@ -120,14 +120,23 @@ const CattleManagement: React.FC = () => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  /** Drop blank optional fields and NaN numbers so the API validators don't reject them. */
-  const buildPayload = (): Record<string, unknown> => {
+  /**
+   * Blank optional fields are left out on create, and sent as null on edit so
+   * a field the user cleared is actually cleared (not silently kept).
+   */
+  const buildPayload = (isEdit: boolean): Record<string, unknown> => {
     const payload: Record<string, unknown> = {};
     (Object.keys(formData) as (keyof CattleFormData)[]).forEach((key) => {
       const value = formData[key];
-      if (value === undefined || value === null) return;
-      if (typeof value === 'string' && value.trim() === '') return;
-      if (typeof value === 'number' && Number.isNaN(value)) return;
+      const blank =
+        value === undefined ||
+        value === null ||
+        (typeof value === 'string' && value.trim() === '') ||
+        (typeof value === 'number' && Number.isNaN(value));
+      if (blank) {
+        if (isEdit) payload[key] = null;
+        return;
+      }
       payload[key] = typeof value === 'string' ? value.trim() : value;
     });
     return payload;
@@ -139,7 +148,7 @@ const CattleManagement: React.FC = () => {
     setSaving(true);
 
     try {
-      const payload = buildPayload();
+      const payload = buildPayload(Boolean(editingCattle));
       if (editingCattle) {
         await cattleAPI.update(editingCattle._id, payload);
       } else {

@@ -2,6 +2,10 @@ import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  TextInput,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -16,7 +20,8 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { ApiError, cattleAPI } from '../services/api';
 import { offlineApi } from '../services/offlineApi';
 import { formatCurrency, formatLiters } from '../utils/formatCurrency';
-import { formatDate } from '../utils/date';
+import { formatDate, todayDateOnly } from '../utils/date';
+import { useOfflineAPI } from '../hooks/useOfflineAPI';
 import { colors, healthColor, radius, spacing, statusColor } from '../constants/theme';
 import type { CattleSummary } from '../types';
 import type { RootStackParamList } from '../navigation/AppNavigator';
@@ -33,6 +38,56 @@ const CattleDetailScreen = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { isOnline } = useOfflineAPI();
+
+  // Sale form
+  const [showSale, setShowSale] = useState(false);
+  const [saleDate, setSaleDate] = useState(todayDateOnly());
+  const [salePrice, setSalePrice] = useState('');
+  const [buyer, setBuyer] = useState('');
+  const [selling, setSelling] = useState(false);
+
+  const submitSale = async () => {
+    const price = Number(salePrice);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(saleDate)) {
+      return Alert.alert('Validation', 'Enter the sale date as YYYY-MM-DD.');
+    }
+    if (!salePrice || Number.isNaN(price) || price < 0) {
+      return Alert.alert('Validation', 'Enter the sale price in FBu.');
+    }
+    setSelling(true);
+    try {
+      await cattleAPI.sell(cattleId, {
+        sale_date: saleDate,
+        sale_price: price,
+        buyer: buyer.trim() || undefined,
+      });
+      setShowSale(false);
+      await load();
+    } catch (err) {
+      Alert.alert('Could not record the sale', err instanceof ApiError ? err.displayMessage : 'Please try again.');
+    } finally {
+      setSelling(false);
+    }
+  };
+
+  const confirmUndoSale = () => {
+    Alert.alert('Undo this sale?', 'The animal returns to the herd and the sale income is removed.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Undo sale',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await cattleAPI.undoSale(cattleId);
+            await load();
+          } catch (err) {
+            Alert.alert('Could not undo', err instanceof ApiError ? err.displayMessage : 'Please try again.');
+          }
+        },
+      },
+    ]);
+  };
 
   const load = useCallback(async () => {
     try {
@@ -52,34 +107,32 @@ const CattleDetailScreen = () => {
     void load();
   }, [load]);
 
+  /** Only for an animal entered by mistake: anything with history is archived instead. */
   const confirmDelete = () => {
     const name = summary?.cattle.name ?? 'this animal';
-    const milkCount = summary?.summary.milk_production.record_count ?? 0;
-
-    Alert.alert(
-      `Delete ${name}?`,
-      milkCount > 0
-        ? `This also permanently deletes its milk and feeding history. This cannot be undone.`
-        : 'This cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await offlineApi.deleteCattle(cattleId);
-              navigation.goBack();
-            } catch (err) {
-              Alert.alert(
-                'Delete failed',
-                err instanceof ApiError ? err.displayMessage : 'Please try again.'
-              );
-            }
-          },
+    Alert.alert(`Delete ${name}?`, 'Use this only for an animal entered by mistake. This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await cattleAPI.remove(cattleId);
+            await offlineApi.getCattle(); // refresh the cached herd
+            navigation.goBack();
+          } catch (err) {
+            Alert.alert(
+              'Delete failed',
+              err instanceof ApiError && err.code === 'CATTLE_HAS_HISTORY'
+                ? 'This animal has records. Mark it as sold, or set its status to Deceased, to archive it.'
+                : err instanceof ApiError
+                  ? err.displayMessage
+                  : 'Please try again.'
+            );
+          }
         },
-      ]
-    );
+      },
+    ]);
   };
 
   if (loading) {
@@ -102,7 +155,9 @@ const CattleDetailScreen = () => {
     );
   }
 
-  const { cattle, summary: stats, recent_milk_records, recent_feeding_records } = summary;
+  const { cattle, summary: stats, lifetime, recent_milk_records, recent_feeding_records } = summary;
+  const hasHistory = lifetime.milk_record_count > 0 || lifetime.feed_cost > 0 || lifetime.sale_income > 0;
+  const isSold = cattle.current_status === 'Sold';
 
   const age = cattle.age_in_months;
   const ageLabel =
@@ -153,6 +208,34 @@ const CattleDetailScreen = () => {
           <Row label="Purchase price" value={formatCurrency(cattle.purchase_price)} />
         )}
         {cattle.notes ? <Row label="Notes" value={cattle.notes} /> : null}
+      </Card>
+
+      {/* Sale */}
+      {isSold && (
+        <Card title="Sale">
+          {cattle.sale_date ? <Row label="Sold on" value={formatDate(cattle.sale_date)} /> : null}
+          {cattle.sale_price != null && (
+            <Row label="Sale price" value={formatCurrency(cattle.sale_price)} emphasis />
+          )}
+          {cattle.buyer ? <Row label="Buyer" value={cattle.buyer} /> : null}
+        </Card>
+      )}
+
+      {/* Lifetime */}
+      <Card title="Lifetime">
+        <Row label="Milk" value={formatLiters(lifetime.total_liters)} />
+        <Row label="Milk income" value={formatCurrency(lifetime.milk_income)} />
+        {lifetime.sale_income > 0 && (
+          <Row label="Sale income" value={formatCurrency(lifetime.sale_income)} />
+        )}
+        <Row label="Feed cost" value={formatCurrency(lifetime.feed_cost)} />
+        <Row label="Net" value={formatCurrency(lifetime.net)} emphasis />
+        {lifetime.first_milk_date && (
+          <Row
+            label="Milked"
+            value={`${formatDate(lifetime.first_milk_date)} – ${formatDate(lifetime.last_milk_date ?? lifetime.first_milk_date)}`}
+          />
+        )}
       </Card>
 
       {/* Production */}
@@ -221,10 +304,94 @@ const CattleDetailScreen = () => {
         </Card>
       )}
 
-      <TouchableOpacity style={styles.deleteButton} onPress={confirmDelete}>
-        <MaterialIcons name="delete-outline" size={20} color={colors.text} />
-        <Text style={styles.deleteText}>Delete animal</Text>
-      </TouchableOpacity>
+      {/* Sale and archive need the server, so they are online-only. */}
+      {!isSold && (
+        <TouchableOpacity
+          style={[styles.sellButton, !isOnline && styles.disabledButton]}
+          onPress={() => setShowSale(true)}
+          disabled={!isOnline}
+        >
+          <MaterialIcons name="sell" size={20} color={colors.background} />
+          <Text style={styles.sellText}>{isOnline ? 'Mark as sold' : 'Mark as sold (needs connection)'}</Text>
+        </TouchableOpacity>
+      )}
+      {isSold && (
+        <TouchableOpacity
+          style={[styles.deleteButton, !isOnline && styles.disabledButton]}
+          onPress={confirmUndoSale}
+          disabled={!isOnline}
+        >
+          <MaterialIcons name="undo" size={20} color={colors.text} />
+          <Text style={styles.deleteText}>Undo sale</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* Deleting is only for mistakes; animals with records are archived instead. */}
+      {!hasHistory && (
+        <TouchableOpacity
+          style={[styles.deleteButton, !isOnline && styles.disabledButton]}
+          onPress={confirmDelete}
+          disabled={!isOnline}
+        >
+          <MaterialIcons name="delete-outline" size={20} color={colors.text} />
+          <Text style={styles.deleteText}>Delete (entered by mistake)</Text>
+        </TouchableOpacity>
+      )}
+
+      <Modal visible={showSale} animationType="slide" transparent onRequestClose={() => setShowSale(false)}>
+        <KeyboardAvoidingView
+          style={styles.overlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <View style={styles.sheet}>
+            <Text style={styles.sheetTitle}>Sell {cattle.name}</Text>
+            <Text style={styles.sheetHint}>
+              The animal moves to the archive with all its records. The sale is added to income.
+            </Text>
+            <Text style={styles.inputLabel}>Sale date (YYYY-MM-DD)</Text>
+            <TextInput
+              style={styles.input}
+              value={saleDate}
+              onChangeText={setSaleDate}
+              placeholder="YYYY-MM-DD"
+              placeholderTextColor={colors.textDisabled}
+            />
+            <Text style={styles.inputLabel}>Sale price (FBu) *</Text>
+            <TextInput
+              style={styles.input}
+              value={salePrice}
+              onChangeText={setSalePrice}
+              keyboardType="numeric"
+              placeholder="e.g. 900000"
+              placeholderTextColor={colors.textDisabled}
+            />
+            <Text style={styles.inputLabel}>Buyer</Text>
+            <TextInput
+              style={styles.input}
+              value={buyer}
+              onChangeText={setBuyer}
+              placeholder="Optional"
+              placeholderTextColor={colors.textDisabled}
+            />
+            <View style={styles.sheetActions}>
+              <TouchableOpacity style={styles.cancelButton} onPress={() => setShowSale(false)}>
+                <Text style={styles.cancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.confirmButton, selling && styles.disabledButton]}
+                onPress={submitSale}
+                disabled={selling}
+              >
+                {selling ? (
+                  <ActivityIndicator color={colors.background} />
+                ) : (
+                  <Text style={styles.confirmText}>Record sale</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </ScrollView>
   );
 };
@@ -260,6 +427,55 @@ const Badge = ({ label, color }: { label: string; color?: string }) => (
 );
 
 const styles = StyleSheet.create({
+  sellButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    paddingVertical: spacing.lg,
+    marginTop: spacing.lg,
+  },
+  sellText: { color: colors.background, fontWeight: '700', fontSize: 16 },
+  disabledButton: { opacity: 0.5 },
+  overlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.6)' },
+  sheet: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
+    padding: spacing.xl,
+  },
+  sheetTitle: { color: colors.text, fontSize: 20, fontWeight: '700' },
+  sheetHint: { color: colors.textMuted, fontSize: 13, marginTop: spacing.xs, marginBottom: spacing.md },
+  inputLabel: { color: colors.textMuted, fontSize: 14, marginTop: spacing.md, marginBottom: spacing.xs },
+  input: {
+    backgroundColor: colors.surfaceAlt,
+    color: colors.text,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    borderRadius: radius.sm,
+    padding: spacing.md,
+    fontSize: 16,
+  },
+  sheetActions: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.xl },
+  cancelButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    borderRadius: radius.sm,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+  },
+  cancelText: { color: colors.textMuted, fontWeight: '600' },
+  confirmButton: {
+    flex: 1,
+    backgroundColor: colors.primary,
+    borderRadius: radius.sm,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+  },
+  confirmText: { color: colors.background, fontWeight: '700' },
   container: { flex: 1, backgroundColor: colors.background },
   content: { padding: spacing.lg, paddingBottom: spacing.xxl * 2 },
   centered: {

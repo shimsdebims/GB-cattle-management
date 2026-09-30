@@ -151,8 +151,12 @@ const isOnline = () => getSyncState().isOnline;
 function isPermanentFailure(error: unknown): boolean {
   if (!(error instanceof ApiError)) return false;
   if (error.isNetworkError) return false;
+  // 401 = logged out, not a bad payload: keep it queued until the next login.
+  if (error.status === 401) return false;
   return error.status >= 400 && error.status < 500 && error.status !== 429;
 }
+
+const isLoggedOut = (error: unknown) => error instanceof ApiError && error.status === 401;
 
 /** Rewrites any temp ids in an operation using the mapping learned so far. */
 function resolveOperation(
@@ -247,6 +251,14 @@ export async function synchronize(): Promise<void> {
         await replaceLocalId(operation.entity, original.recordId, result as LocalRecord);
       }
     } catch (error) {
+      // Session ended: stop here and keep this and everything after it, with
+      // no attempt counted. The queue resumes after the next login.
+      if (isLoggedOut(error)) {
+        const index = queue.indexOf(original);
+        remaining.push(...queue.slice(index));
+        break;
+      }
+
       // The server already has this record (e.g. duplicate milk day): the
       // operation is satisfied, so drop it instead of retrying forever.
       if (error instanceof ApiError && error.status === 409) {

@@ -1,6 +1,7 @@
 import axios, { AxiosError, AxiosRequestConfig } from 'axios';
 
 import { API_BASE_URL, API_TIMEOUT_MS } from './apiConfig';
+import { clearSession, getToken, type AuthUser } from './authStore';
 import type {
   Cattle,
   CattleFormData,
@@ -13,6 +14,7 @@ import type {
   FeedingFormData,
   FieldError,
   FinancialSummary,
+  MilkPriceEntry,
   MilkFormData,
   MilkProduction,
   MonthlyGrid,
@@ -21,6 +23,7 @@ import type {
   Pagination,
   Revenue,
   RevenueFormData,
+  SaleFormData,
 } from '../types';
 
 // ─── Envelope ────────────────────────────────────────────────────────────────
@@ -31,6 +34,7 @@ interface Envelope<T> {
   pagination?: Pagination;
   message?: string;
   error?: string;
+  code?: string;
   errors?: FieldError[];
 }
 
@@ -40,16 +44,21 @@ const client = axios.create({
   timeout: API_TIMEOUT_MS,
 });
 
-const apiKey = process.env.EXPO_PUBLIC_API_KEY;
-
+// A key baked into the app bundle is public, so auth is a per-user session token.
 client.interceptors.request.use((config) => {
-  if (apiKey && !config.headers?.Authorization) {
-    config.headers = {
-      ...(config.headers ?? {}),
-      Authorization: `Bearer ${apiKey}`,
-    };
+  const token = getToken();
+  if (token && !config.headers?.Authorization) {
+    config.headers.set('Authorization', `Bearer ${token}`);
   }
   return config;
+});
+
+// An expired or revoked session sends the user back to the login screen.
+client.interceptors.response.use(undefined, (error: AxiosError<{ code?: string }>) => {
+  if (error.response?.status === 401 && error.response.data?.code === 'AUTH_REQUIRED') {
+    void clearSession();
+  }
+  return Promise.reject(error);
 });
 
 /**
@@ -63,19 +72,29 @@ export class ApiError extends Error {
   fieldErrors: FieldError[];
   isNetworkError: boolean;
 
+  /** Machine-readable reason from the API, e.g. CATTLE_HAS_HISTORY. */
+  code?: string;
+
   constructor(
     message: string,
     {
       status = 0,
       fieldErrors = [],
       isNetworkError = false,
-    }: { status?: number; fieldErrors?: FieldError[]; isNetworkError?: boolean } = {}
+      code,
+    }: {
+      status?: number;
+      fieldErrors?: FieldError[];
+      isNetworkError?: boolean;
+      code?: string;
+    } = {}
   ) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.fieldErrors = fieldErrors;
     this.isNetworkError = isNetworkError;
+    this.code = code;
   }
 
   /** Single string suitable for an Alert body. */
@@ -103,6 +122,7 @@ function toApiError(error: unknown): ApiError {
   return new ApiError(body?.message || body?.error || 'Something went wrong.', {
     status: response?.status ?? 0,
     fieldErrors: body?.errors ?? [],
+    code: body?.code,
   });
 }
 
@@ -149,15 +169,42 @@ interface DateRangeParams {
 
 // ─── Endpoints ───────────────────────────────────────────────────────────────
 
+export const authAPI = {
+  login: (username: string, password: string) =>
+    request<{ token: string; user: AuthUser }>({
+      method: 'POST',
+      url: '/auth/login',
+      data: { username, password },
+    }),
+
+  /** `auth_required: false` means the server has login switched off. */
+  me: () => request<{ user: AuthUser | null; auth_required: boolean }>({ method: 'GET', url: '/auth/me' }),
+
+  changePassword: (current_password: string, new_password: string) =>
+    request<{ token: string; user: AuthUser }>({
+      method: 'POST',
+      url: '/auth/change-password',
+      data: { current_password, new_password },
+    }),
+};
+
 export const cattleAPI = {
   list: (params?: {
     status?: string;
     health?: string;
     breed?: string;
     search?: string;
+    /** exclude = working herd, only = sold/deceased archive */
+    archived?: 'include' | 'exclude' | 'only';
     page?: number;
     limit?: number;
   }) => requestList<Cattle>({ method: 'GET', url: '/cattle', params }),
+
+  sell: (id: string, data: SaleFormData) =>
+    request<{ cattle: Cattle; revenue: Revenue }>({ method: 'POST', url: `/cattle/${id}/sell`, data }),
+
+  undoSale: (id: string) =>
+    request<{ cattle: Cattle }>({ method: 'DELETE', url: `/cattle/${id}/sale` }),
 
   get: (id: string) => request<Cattle>({ method: 'GET', url: `/cattle/${id}` }),
 
@@ -249,8 +296,14 @@ export const analyticsAPI = {
 export const settingsAPI = {
   get: () => request<FarmSettings>({ method: 'GET', url: '/settings' }),
 
-  update: (data: { milk_price_per_liter?: number; currency?: string }) =>
+  /** `effective_from` (YYYY-MM-DD) schedules the price from that day; default today. */
+  update: (data: { milk_price_per_liter?: number; currency?: string; effective_from?: string }) =>
     request<FarmSettings>({ method: 'PUT', url: '/settings', data }),
+
+  milkPrices: () => request<MilkPriceEntry[]>({ method: 'GET', url: '/settings/milk-prices' }),
+
+  deleteMilkPrice: (id: string) =>
+    request<{ _id: string }>({ method: 'DELETE', url: `/settings/milk-prices/${id}` }),
 };
 
 export const healthAPI = {

@@ -17,22 +17,29 @@ import { API_BASE_URL, ApiError, settingsAPI } from '../services/api';
 import { offlineApi } from '../services/offlineApi';
 import { useOfflineAPI } from '../hooks/useOfflineAPI';
 import { formatCurrency } from '../utils/formatCurrency';
+import { formatDate, todayDateOnly } from '../utils/date';
+import { clearSession } from '../services/authStore';
+import { useAuthState } from '../hooks/useAuth';
 import { colors, radius, spacing } from '../constants/theme';
-import type { FarmSettings } from '../types';
+import type { FarmSettings, MilkPriceEntry } from '../types';
 
 const SettingsScreen = () => {
   const { pendingCount, failedCount, lastSyncAt, isOnline } = useOfflineAPI();
 
   const [settings, setSettings] = useState<FarmSettings | null>(null);
   const [priceInput, setPriceInput] = useState('');
+  const [effectiveFrom, setEffectiveFrom] = useState(todayDateOnly());
+  const [prices, setPrices] = useState<MilkPriceEntry[]>([]);
+  const auth = useAuthState();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const data = await settingsAPI.get();
+      const [data, history] = await Promise.all([settingsAPI.get(), settingsAPI.milkPrices()]);
       setSettings(data);
+      setPrices(history);
       setPriceInput(String(data.milk_price_per_liter));
       setError(null);
     } catch (err) {
@@ -53,12 +60,22 @@ const SettingsScreen = () => {
     if (Number.isNaN(price) || price < 0) {
       return Alert.alert('Validation', 'Enter a valid price, e.g. 1700.');
     }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveFrom)) {
+      return Alert.alert('Validation', 'Enter the start date as YYYY-MM-DD.');
+    }
 
     setSaving(true);
     try {
-      const updated = await settingsAPI.update({ milk_price_per_liter: price });
+      const updated = await settingsAPI.update({
+        milk_price_per_liter: price,
+        effective_from: effectiveFrom,
+      });
       setSettings(updated);
-      Alert.alert('Saved', 'Milk price updated. Revenue figures now use this rate.');
+      setPrices(await settingsAPI.milkPrices());
+      Alert.alert(
+        'Saved',
+        `From ${formatDate(effectiveFrom)} milk is valued at ${formatCurrency(price)}/L. Earlier days keep the price they were recorded at.`
+      );
     } catch (err) {
       Alert.alert(
         'Could not save',
@@ -67,6 +84,39 @@ const SettingsScreen = () => {
     } finally {
       setSaving(false);
     }
+  };
+
+  const logout = () => {
+    const warning =
+      pendingCount > 0
+        ? `${pendingCount} change(s) are not sent yet. They stay on this phone and are sent after you log in again.`
+        : 'You will need your password to log back in.';
+    Alert.alert('Log out?', warning, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Log out', style: 'destructive', onPress: () => void clearSession() },
+    ]);
+  };
+
+  const removePrice = (entry: MilkPriceEntry) => {
+    Alert.alert(
+      'Remove this price change?',
+      `Days from ${formatDate(entry.effective_from)} go back to the previous price.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await settingsAPI.deleteMilkPrice(entry._id);
+              await load();
+            } catch (err) {
+              Alert.alert('Could not remove', err instanceof ApiError ? err.displayMessage : 'Please try again.');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const clearFailed = () => {
@@ -114,8 +164,8 @@ const SettingsScreen = () => {
             <Text style={styles.cardTitle}>Milk price per litre</Text>
           </View>
           <Text style={styles.cardBody}>
-            Milk income is calculated from recorded production at this rate, so it
-            is never entered by hand.
+            Each milk day is valued at the price in force that day. A new price
+            applies from its start date; earlier days are never revalued.
           </Text>
 
           <View style={styles.inputRow}>
@@ -130,6 +180,16 @@ const SettingsScreen = () => {
             />
             <Text style={styles.unit}>FBu / L</Text>
           </View>
+
+          <Text style={styles.rowLabel}>Applies from (YYYY-MM-DD)</Text>
+          <TextInput
+            style={[styles.input, styles.dateInput]}
+            value={effectiveFrom}
+            onChangeText={setEffectiveFrom}
+            placeholder="YYYY-MM-DD"
+            placeholderTextColor={colors.textDisabled}
+            autoCorrect={false}
+          />
 
           {settings && (
             <Text style={styles.current}>
@@ -149,6 +209,37 @@ const SettingsScreen = () => {
             )}
           </TouchableOpacity>
         </View>
+
+        {/* Price history */}
+        {prices.length > 0 && (
+          <View style={styles.card}>
+            <View style={styles.cardHeader}>
+              <MaterialIcons name="history" size={20} color={colors.primary} />
+              <Text style={styles.cardTitle}>Price history</Text>
+            </View>
+            {prices.map((entry) => {
+              const baseline = entry.effective_from.startsWith('1970-');
+              return (
+                <View key={entry._id} style={styles.row}>
+                  <Text style={styles.rowLabel}>
+                    {baseline ? 'Starting price' : `From ${formatDate(entry.effective_from)}`}
+                  </Text>
+                  <View style={styles.priceRight}>
+                    <Text style={styles.rowValue}>{formatCurrency(entry.price_per_liter)}/L</Text>
+                    {!baseline && (
+                      <TouchableOpacity
+                        onPress={() => removePrice(entry)}
+                        accessibilityLabel="Remove this price change"
+                      >
+                        <MaterialIcons name="close" size={18} color={colors.textFaint} />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
 
         {/* Sync */}
         <View style={styles.card}>
@@ -194,6 +285,18 @@ const SettingsScreen = () => {
             All amounts are shown in Burundian Francs (FBu).
           </Text>
         </View>
+        {auth.status === 'signedIn' && (
+          <View style={styles.card}>
+            <View style={styles.cardHeader}>
+              <MaterialIcons name="person" size={20} color={colors.textFaint} />
+              <Text style={styles.cardTitle}>Account</Text>
+            </View>
+            <Row label="Logged in as" value={auth.user?.username ?? '—'} />
+            <TouchableOpacity style={styles.dangerButton} onPress={logout}>
+              <Text style={styles.dangerText}>Log out</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -207,6 +310,15 @@ const Row = ({ label, value }: { label: string; value: string }) => (
 );
 
 const styles = StyleSheet.create({
+  dateInput: {
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  priceRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   container: { flex: 1, backgroundColor: colors.background },
   centered: {
     flex: 1,

@@ -53,6 +53,11 @@ export interface Cattle extends Timestamped {
   purchase_price?: number;
   current_status: CattleStatus;
   notes?: string;
+  /** Set when the cow is sold; the sale income is a linked Revenue record. */
+  sale_date?: string;
+  sale_price?: number;
+  buyer?: string;
+  deceased_date?: string;
   /** Virtual supplied by the API. */
   age_in_months?: number;
 }
@@ -71,6 +76,8 @@ export interface MilkProduction extends Timestamped {
   date_recorded: string;
   quantity_liters: number;
   quality_score?: number;
+  /** Price in force on that day, stored by the server. */
+  price_per_liter?: number;
   notes?: string;
 }
 
@@ -216,8 +223,35 @@ export interface CattleSummary {
       record_count: number;
     };
   };
+  /** Whole-life figures, archived cows included. */
+  lifetime: {
+    total_liters: number;
+    milk_income: number;
+    milk_record_count: number;
+    first_milk_date: string | null;
+    last_milk_date: string | null;
+    feed_cost: number;
+    sale_income: number;
+    net: number;
+    currency: string;
+  };
+  sale_revenue: Revenue[];
   recent_milk_records: MilkProduction[];
   recent_feeding_records: Feeding[];
+}
+
+export interface SaleFormData {
+  sale_date: string;
+  sale_price: number;
+  buyer?: string;
+  notes?: string;
+}
+
+export interface MilkPriceEntry {
+  _id: string;
+  effective_from: string;
+  price_per_liter: number;
+  notes?: string;
 }
 
 export interface MonthlyGridCow {
