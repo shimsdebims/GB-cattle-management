@@ -42,6 +42,9 @@ jobs:
           cache-dependency-path: cattle-management-mobile/package-lock.json
       - run: npm ci
       - run: npx tsc --noEmit
+      # The iPhone runs this web build, so it must keep building.
+      - name: Web export (what Vercel serves to the iPhone)
+        run: npx expo export -p web
 
   web:
     name: Web build
