@@ -8,6 +8,40 @@
  */
 
 const MONTH_PATTERN = /^\d{4}-\d{2}$/;
+const DAY_PATTERN = /^(\d{4}-\d{2}-\d{2})/;
+
+/**
+ * The farm is in Bujumbura: UTC+2 all year (Burundi has no daylight saving),
+ * so a fixed offset is exact and needs no time-zone database.
+ */
+const FARM_UTC_OFFSET_HOURS = 2;
+
+/**
+ * The farm's calendar date right now, "YYYY-MM-DD".
+ *
+ * The server runs on UTC. Between 00:00 and 02:00 in Bujumbura the server's
+ * date is still yesterday, so "today" by the server clock rejected milk dated
+ * the farm's today as being in the future.
+ */
+function farmToday(now = new Date()) {
+  return new Date(now.getTime() + FARM_UTC_OFFSET_HOURS * 3600 * 1000)
+    .toISOString()
+    .slice(0, 10);
+}
+
+/**
+ * The calendar date a record will be stored under, "YYYY-MM-DD": the date as
+ * written for "YYYY-MM-DD…" strings, else the UTC date (records are stored at
+ * UTC midnight). Null when the value is not a date.
+ */
+function calendarDay(value) {
+  if (typeof value === 'string') {
+    const match = DAY_PATTERN.exec(value);
+    if (match) return match[1];
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
+}
 
 const isValidMonth = (month) => typeof month === 'string' && MONTH_PATTERN.test(month);
 
@@ -45,6 +79,9 @@ const roundInt = (n) => Math.round(n);
 
 module.exports = {
   MONTH_PATTERN,
+  FARM_UTC_OFFSET_HOURS,
+  farmToday,
+  calendarDay,
   isValidMonth,
   startOfUtcDay,
   utcMonthRange,

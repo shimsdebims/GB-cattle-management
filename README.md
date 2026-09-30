@@ -27,7 +27,7 @@ cattle-management-mobile/        the Expo app
     ├── middleware/              validation + response helpers
     ├── constants/domain.js      the shared vocabulary (see below)
     ├── scripts/                 seed, connection check, smoke test
-    └── tests/                   83 tests, no external database needed
+    └── tests/                   Jest suite, no external database needed
 ```
 
 ## Getting started
@@ -139,9 +139,22 @@ These are deliberate and enforced by the API:
   date, price and buyer, books the sale as income linked to the animal, and
   moves it to the Archive. Delete works only for an animal with no records.
 - **One milk record per cow per calendar day.** Enforced by a unique index, so
-  double entry is rejected rather than silently doubling a day's total.
+  double entry is rejected rather than silently doubling a day's total. The 409
+  (`MILK_DAY_EXISTS`) carries the existing record so the app can ask what to do.
+- **Morning and evening are optional.** When either is given, the day total
+  (`quantity_liters`) is their sum; every total, grid and income reads that one
+  field.
+- **"Today" is the farm's day** (Bujumbura, UTC+2, no daylight saving), on the
+  server and in the app. The server clock is UTC, so a "not in the future" check
+  by the server's own date rejected milk entered between 00:00 and 02:00.
 - **Dates are calendar dates** (`YYYY-MM-DD`), stored at UTC midnight. Sending a
   full timestamp from a UTC+2 phone would shift the day backwards.
+- **Retried saves are never doubled.** The app sends a `client_id` with every
+  new record; a retry with the same id gets the first record back (200) instead
+  of a second copy.
+- **Milk edits say which version they change** (`expected_updated_at`). If the
+  record changed on another phone meanwhile, the answer is a 409
+  (`MILK_CHANGED`) with the current record, not a silent overwrite.
 - **Expense amounts can be derived** from quantity × cost per unit. When both
   are given, the derived value wins so the total can't contradict the line item.
 
@@ -164,6 +177,14 @@ durable operation; the queue replays in order when the connection returns,
 mapping temporary IDs onto the IDs the server assigns. The badge in the header
 shows connection and queue state, and Settings lists anything that failed.
 
+"Online" means the farm's server answers (`/api/health`), not just that a
+network is up. The queue is sent at start-up, on reconnect, when the app comes
+back to the foreground and every 30 s while anything is waiting.
+
+A milk entry that meets a different figure for the same cow and day (two phones,
+or an edit made elsewhere) is never dropped: it waits on the Milk tab until he
+chooses to keep the saved figure, use this phone's, or add the two.
+
 ## Commands
 
 From `cattle-management-mobile/backend-mongo`:
@@ -172,7 +193,7 @@ From `cattle-management-mobile/backend-mongo`:
 - `npm start` — start for production
 - `npm run check` — verify the database connection
 - `npm run populate` — reset and seed sample data
-- `npm test` — 83 tests on an in-memory MongoDB, no setup required
+- `npm test` — the full suite on an in-memory MongoDB, no setup required
 - `npm run smoke` — boot the real API and assert 28 behaviours end to end
 
 From `cattle-management-mobile`:

@@ -1,14 +1,18 @@
 import NetInfo from '@react-native-community/netinfo';
+import { AppState } from 'react-native';
 
-import { ApiError, cattleAPI, feedingAPI, financialAPI, milkAPI } from './api';
+import { API_BASE_URL, ApiError, cattleAPI, feedingAPI, financialAPI, milkAPI } from './api';
 import {
   EntityName,
+  MilkConflict,
   PendingOperation,
   enqueue,
   getSyncState,
   isTempId,
+  newClientId,
   newTempId,
   readCache,
+  readConflicts,
   readFailed,
   readIdMap,
   readQueue,
@@ -17,6 +21,7 @@ import {
   resolveId,
   setSyncState,
   writeCache,
+  writeConflicts,
   writeFailed,
   writeLastSync,
   writeQueue,
@@ -117,12 +122,32 @@ const nowIso = () => new Date().toISOString();
 
 let listenerAttached = false;
 
-/** Starts connectivity tracking and replays the queue when we come back online. */
+/** While changes wait on the phone, try to send them this often. */
+const RETRY_INTERVAL_MS = 30 * 1000;
+
+/**
+ * Starts connectivity tracking and keeps the queue moving.
+ *
+ * Sends queued changes at start-up, on every offline → online edge, whenever
+ * the app comes back to the foreground, and every 30 s while any are waiting:
+ * a send that fails half-way (lost reply, server waking up) is retried without
+ * waiting for the connection to drop and return, which may never happen.
+ */
 export function initOfflineSync(): () => void {
   if (listenerAttached) return () => undefined;
   listenerAttached = true;
 
-  void refreshQueueCounters();
+  // "Online" means the farm's server answers, not merely that some network is
+  // up: the default probe (a Google URL) says nothing about our server.
+  NetInfo.configure({
+    reachabilityUrl: `${API_BASE_URL}/health`,
+    reachabilityTest: async (response) => response.status === 200,
+    reachabilityShortTimeout: 5 * 1000,
+    reachabilityLongTimeout: 60 * 1000,
+    reachabilityRequestTimeout: 15 * 1000,
+  });
+
+  void refreshQueueCounters().then(() => synchronize());
 
   const unsubscribe = NetInfo.addEventListener((netState) => {
     const isOnline = Boolean(netState.isConnected && netState.isInternetReachable !== false);
@@ -134,9 +159,19 @@ export function initOfflineSync(): () => void {
     if (isOnline && !wasOnline) void synchronize();
   });
 
+  const retry = setInterval(() => {
+    if (getSyncState().pendingCount > 0) void synchronize();
+  }, RETRY_INTERVAL_MS);
+
+  const appState = AppState.addEventListener('change', (state) => {
+    if (state === 'active') void synchronize();
+  });
+
   return () => {
     listenerAttached = false;
     unsubscribe();
+    clearInterval(retry);
+    appState.remove();
   };
 }
 
@@ -231,9 +266,24 @@ export async function synchronize(): Promise<void> {
   const idMap = await readIdMap();
   const remaining: PendingOperation[] = [];
   const failed = await readFailed();
+  // Ops folded into a milk conflict (later edits of a clashing offline entry).
+  const absorbed = new Set<string>();
+  // Latest server version per record, learned during this run, so a second
+  // queued edit of the same record is not mistaken for someone else's change.
+  const latestVersion: Record<string, string> = {};
 
   for (const original of queue) {
+    if (absorbed.has(original.id)) continue;
     const operation = resolveOperation(original, idMap);
+
+    if (operation.entity === 'milk' && operation.type === 'UPDATE') {
+      if (isTempId(original.recordId)) {
+        // Edits of a record this phone created: no server version to compare.
+        delete operation.payload.expected_updated_at;
+      } else if (latestVersion[operation.recordId] && operation.payload.expected_updated_at) {
+        operation.payload.expected_updated_at = latestVersion[operation.recordId];
+      }
+    }
 
     // A create that never synced cannot be updated or deleted server-side yet.
     if (operation.type !== 'CREATE' && isTempId(operation.recordId)) {
@@ -250,6 +300,10 @@ export async function synchronize(): Promise<void> {
         await recordIdMapping(original.recordId, result._id);
         await replaceLocalId(operation.entity, original.recordId, result as LocalRecord);
       }
+      if (result && 'updated_at' in result && typeof result.updated_at === 'string') {
+        latestVersion[result._id] = result.updated_at;
+        if (operation.type === 'UPDATE') await upsertLocal(operation.entity, result as LocalRecord);
+      }
     } catch (error) {
       // Session ended: stop here and keep this and everything after it, with
       // no attempt counted. The queue resumes after the next login.
@@ -259,9 +313,24 @@ export async function synchronize(): Promise<void> {
         break;
       }
 
-      // The server already has this record (e.g. duplicate milk day): the
-      // operation is satisfied, so drop it instead of retrying forever.
-      if (error instanceof ApiError && error.status === 409) {
+      // Same cow, same day, different figures: never drop either one. Park it
+      // for him to decide, with any later offline edits of the same entry.
+      if (operation.entity === 'milk' && isMilkClash(error)) {
+        const laterOps = queue.slice(queue.indexOf(original) + 1);
+        const sameEntry = isTempId(original.recordId)
+          ? laterOps.filter((op) => op.entity === 'milk' && op.recordId === original.recordId)
+          : [];
+        sameEntry.forEach((op) => absorbed.add(op.id));
+
+        // Deleted again on this phone before syncing: nothing left to keep.
+        if (!sameEntry.some((op) => op.type === 'DELETE')) {
+          const mine = sameEntry.reduce(
+            (acc, op) => ({ ...acc, ...op.payload }),
+            operation.payload
+          );
+          await addMilkConflict(mine, (error as ApiError).data as MilkConflict['server']);
+        }
+        if (isTempId(original.recordId)) await removeLocal('milk', original.recordId);
         continue;
       }
 
@@ -320,12 +389,15 @@ async function readThrough<T extends LocalRecord>(
 
 // ─── Generic write-through ───────────────────────────────────────────────────
 
-async function createRecord<TRecord extends LocalRecord, TForm>(
+async function createRecord<TRecord extends LocalRecord, TForm extends { client_id?: string }>(
   entity: EntityName,
-  form: TForm,
-  optimistic: TRecord,
+  rawForm: TForm,
+  rawOptimistic: TRecord,
   remote: (data: TForm) => Promise<TRecord>
 ): Promise<TRecord> {
+  // The same id goes with the first attempt and every retry from the queue.
+  const form = { ...rawForm, client_id: rawForm.client_id ?? newClientId() };
+  const optimistic = { ...rawOptimistic, client_id: form.client_id };
   await upsertLocal(entity, optimistic);
 
   if (isOnline()) {
@@ -413,6 +485,187 @@ async function deleteRecord(
 
   await enqueue({ entity, type: 'DELETE', recordId: id, payload: {} });
   await refreshQueueCounters();
+}
+
+// ─── Milk: day entry and conflicts ───────────────────────────────────────────
+
+type MilkValues = Pick<MilkFormData, 'quantity_liters' | 'morning_liters' | 'evening_liters'>;
+
+/** A 409 that carries the server's record for the same cow and day. */
+function isMilkClash(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    error.status === 409 &&
+    (error.code === 'MILK_DAY_EXISTS' || error.code === 'MILK_CHANGED') &&
+    Boolean(error.data)
+  );
+}
+
+const pickValues = (source: Record<string, unknown>): MilkValues => ({
+  quantity_liters: source.quantity_liters as number | null | undefined,
+  morning_liters: source.morning_liters as number | null | undefined,
+  evening_liters: source.evening_liters as number | null | undefined,
+});
+
+/** Parks a clash for him to resolve and shows the server's figures meanwhile. */
+async function addMilkConflict(
+  mineSource: Record<string, unknown>,
+  server: MilkConflict['server']
+): Promise<void> {
+  const conflicts = await readConflicts();
+  const cattleId = typeof server.cattle_id === 'string' ? server.cattle_id : server.cattle_id._id;
+  // An edit's payload has no date; the server's record always does.
+  const day = String(mineSource.date_recorded ?? server.date_recorded).slice(0, 10);
+
+  // A newer clash for the same cow and day replaces the older one.
+  const others = conflicts.filter(
+    (c) => !(c.cattle_id === cattleId && c.date_recorded === day)
+  );
+  others.push({
+    id: newTempId(),
+    cattle_id: cattleId,
+    date_recorded: day,
+    mine: pickValues(mineSource),
+    server,
+    createdAt: Date.now(),
+  });
+  await writeConflicts(others);
+  await upsertLocal('milk', server as unknown as LocalRecord);
+  await refreshQueueCounters();
+}
+
+/** Total of one side of a conflict: the split when there is one. */
+export function milkTotal(values: MilkValues): number {
+  if (values.morning_liters != null || values.evening_liters != null) {
+    return (values.morning_liters ?? 0) + (values.evening_liters ?? 0);
+  }
+  return values.quantity_liters ?? 0;
+}
+
+const hasSplit = (v: MilkValues) => v.morning_liters != null || v.evening_liters != null;
+
+export type ConflictChoice = 'server' | 'mine' | 'sum';
+
+/**
+ * Resolves a clash: keep the server's figures, replace them with this phone's,
+ * or add the two (two people each recorded part of the day's milk).
+ */
+export async function resolveMilkConflict(id: string, choice: ConflictChoice): Promise<void> {
+  const conflicts = await readConflicts();
+  const conflict = conflicts.find((c) => c.id === id);
+  if (!conflict) return;
+
+  await writeConflicts(conflicts.filter((c) => c.id !== id));
+  await refreshQueueCounters();
+  if (choice === 'server') return;
+
+  const { mine, server } = conflict;
+  let values: MilkValues;
+  if (choice === 'mine') {
+    values = hasSplit(mine)
+      ? { morning_liters: mine.morning_liters ?? null, evening_liters: mine.evening_liters ?? null }
+      : { quantity_liters: mine.quantity_liters, morning_liters: null, evening_liters: null };
+  } else if (hasSplit(mine) && hasSplit(server)) {
+    values = {
+      morning_liters: (mine.morning_liters ?? 0) + (server.morning_liters ?? 0),
+      evening_liters: (mine.evening_liters ?? 0) + (server.evening_liters ?? 0),
+    };
+  } else {
+    values = {
+      quantity_liters: milkTotal(mine) + milkTotal(server),
+      morning_liters: null,
+      evening_liters: null,
+    };
+  }
+
+  const outcome = await saveMilkEntry({
+    cattle_id: conflict.cattle_id,
+    date_recorded: conflict.date_recorded,
+    existing: server as unknown as MilkProduction,
+    values,
+  });
+  if (outcome.status === 'error') throw new Error(outcome.message);
+}
+
+export const getMilkConflicts = readConflicts;
+
+export type MilkSaveOutcome =
+  | { status: 'saved' }
+  | { status: 'queued' }
+  | { status: 'conflict' }
+  | { status: 'error'; message: string };
+
+/**
+ * Saves one cow's milk for one day: an edit of the existing record when there
+ * is one, else a new record. Clashes become conflicts, never lost entries.
+ */
+export async function saveMilkEntry({
+  cattle_id,
+  date_recorded,
+  existing,
+  values,
+}: {
+  cattle_id: string;
+  date_recorded: string;
+  existing?: MilkProduction;
+  values: MilkValues;
+}): Promise<MilkSaveOutcome> {
+  const queuedBefore = (await readQueue()).length;
+  // Always carry the day total: the server ignores it when a split is given,
+  // but the phone's own copy needs it while the change waits offline.
+  values = { ...values, quantity_liters: milkTotal(values) };
+  try {
+    if (existing) {
+      await offlineApi.updateMilk(existing._id, {
+        ...values,
+        // Lets the server spot an edit made on another phone in the meantime.
+        ...(isTempId(existing._id) ? {} : { expected_updated_at: existing.updated_at }),
+      });
+    } else {
+      await offlineApi.createMilk({
+        cattle_id,
+        date_recorded,
+        ...values,
+      });
+    }
+  } catch (error) {
+    if (isMilkClash(error)) {
+      await addMilkConflict(
+        { cattle_id, date_recorded, ...values },
+        (error as ApiError).data as MilkConflict['server']
+      );
+      return { status: 'conflict' };
+    }
+    return {
+      status: 'error',
+      message: error instanceof ApiError ? error.displayMessage : 'Could not save.',
+    };
+  }
+  const queued = (await readQueue()).length > queuedBefore;
+  return { status: queued ? 'queued' : 'saved' };
+}
+
+const sameDay = (record: MilkProduction, date: string) =>
+  String(record.date_recorded).slice(0, 10) === date;
+
+/**
+ * Every milk record for one day: from the server when online (any date, not
+ * only the recent ones in the cache), plus entries still waiting to sync.
+ */
+export async function getMilkForDay(date: string): Promise<MilkProduction[]> {
+  const cached = await readCache<MilkProduction>('milk');
+  const unsynced = cached.filter((r) => isTempId(r._id) && sameDay(r, date));
+
+  if (!isOnline()) return cached.filter((r) => sameDay(r, date));
+
+  try {
+    const { items } = await milkAPI.list({ date_from: date, date_to: date, limit: 200 });
+    for (const item of items) await upsertLocal('milk', item);
+    return [...items, ...unsynced];
+  } catch (error) {
+    console.warn('offlineApi: falling back to cached milk for the day', error);
+    return cached.filter((r) => sameDay(r, date));
+  }
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
@@ -541,6 +794,12 @@ export const offlineApi = {
     ),
 
   deleteRevenue: (id: string) => deleteRecord('revenue', id, financialAPI.removeRevenue),
+
+  // Milk day entry
+  getMilkForDay,
+  saveMilkEntry,
+  getMilkConflicts,
+  resolveMilkConflict,
 
   // Sync
   synchronize,

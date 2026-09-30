@@ -19,16 +19,12 @@ const {
   REVENUE_SOURCES,
   LIMITS,
 } = require('../constants/domain');
+const { calendarDay, farmToday } = require('../utils/dates');
 
 // ─── Small reusable checks ───────────────────────────────────────────────────
 
 const isPresent = (value) => value !== undefined && value !== null && value !== '';
 
-const endOfToday = () => {
-  const d = new Date();
-  d.setHours(23, 59, 59, 999);
-  return d;
-};
 
 function checkString(errors, data, field, { required, max, min, partial }) {
   const value = data[field];
@@ -110,7 +106,8 @@ function checkDate(errors, data, field, { required, allowFuture = false, partial
     errors.push({ field, message: `${field} must be a valid date` });
     return;
   }
-  if (!allowFuture && date > endOfToday()) {
+  // "Future" means after the farm's today, not the server's (UTC) today.
+  if (!allowFuture && calendarDay(value) > farmToday()) {
     errors.push({ field, message: `${field} cannot be in the future` });
   }
 }
@@ -157,6 +154,8 @@ const validateCattle = (data, { partial = false } = {}) => {
   checkDate(errors, data, 'purchase_date', { ...opts });
   checkString(errors, data, 'notes', { max: LIMITS.NOTES_MAX, ...opts });
 
+  checkString(errors, data, 'client_id', { max: LIMITS.CLIENT_ID_MAX, ...opts });
+
   return result(errors);
 };
 
@@ -166,18 +165,32 @@ const validateMilkProduction = (data, { partial = false } = {}) => {
 
   checkObjectId(errors, data, 'cattle_id', { required: true, ...opts });
   checkDate(errors, data, 'date_recorded', { required: true, ...opts });
-  checkNumber(errors, data, 'quantity_liters', {
-    required: true,
-    min: 0,
-    max: LIMITS.MILK_QUANTITY_MAX,
-    ...opts,
-  });
+
+  // Either the day's total, or a morning and/or evening amount that sums to it.
+  const hasSplit = isPresent(data.morning_liters) || isPresent(data.evening_liters);
+  const litres = { min: 0, max: LIMITS.MILK_QUANTITY_MAX, ...opts };
+  checkNumber(errors, data, 'morning_liters', litres);
+  checkNumber(errors, data, 'evening_liters', litres);
+  checkNumber(errors, data, 'quantity_liters', { required: !hasSplit, ...litres });
+  if (hasSplit) {
+    const sum = Number(data.morning_liters || 0) + Number(data.evening_liters || 0);
+    if (sum > LIMITS.MILK_QUANTITY_MAX) {
+      errors.push({
+        field: 'quantity_liters',
+        message: `morning + evening must not exceed ${LIMITS.MILK_QUANTITY_MAX}`,
+      });
+    }
+  }
+  // The version the app last saw; a mismatch means someone else changed it.
+  checkDate(errors, data, 'expected_updated_at', { allowFuture: true, ...opts });
   checkNumber(errors, data, 'quality_score', {
     min: LIMITS.QUALITY_SCORE_MIN,
     max: LIMITS.QUALITY_SCORE_MAX,
     ...opts,
   });
   checkString(errors, data, 'notes', { max: LIMITS.NOTES_MAX, ...opts });
+
+  checkString(errors, data, 'client_id', { max: LIMITS.CLIENT_ID_MAX, ...opts });
 
   return result(errors);
 };
@@ -198,6 +211,8 @@ const validateFeeding = (data, { partial = false } = {}) => {
   checkNumber(errors, data, 'cost_per_unit', { min: 0, ...opts });
   checkString(errors, data, 'supplier', { max: LIMITS.NAME_MAX, ...opts });
   checkString(errors, data, 'notes', { max: LIMITS.NOTES_MAX, ...opts });
+
+  checkString(errors, data, 'client_id', { max: LIMITS.CLIENT_ID_MAX, ...opts });
 
   return result(errors);
 };
@@ -232,6 +247,8 @@ const validateExpense = (data, { partial = false } = {}) => {
     });
   }
 
+  checkString(errors, data, 'client_id', { max: LIMITS.CLIENT_ID_MAX, ...opts });
+
   return result(errors);
 };
 
@@ -248,6 +265,8 @@ const validateRevenue = (data, { partial = false } = {}) => {
   checkNumber(errors, data, 'amount', { required: true, min: 0, ...opts });
   checkDate(errors, data, 'date_recorded', { required: true, ...opts });
   checkString(errors, data, 'notes', { max: LIMITS.NOTES_MAX, ...opts });
+
+  checkString(errors, data, 'client_id', { max: LIMITS.CLIENT_ID_MAX, ...opts });
 
   return result(errors);
 };
@@ -291,6 +310,9 @@ const validationMiddleware = (schema, options = {}) => {
 
   return (req, res, next) => {
     if (!validator) return next();
+
+    // A client id is fixed when the record is created; edits never change it.
+    if (options.partial && req.body) delete req.body.client_id;
 
     const { valid, errors } = validator(req.body || {}, options);
     if (valid) return next();
@@ -369,6 +391,8 @@ const errorHandler = (err, req, res, next) => { // eslint-disable-line no-unused
     success: false,
     error: err.expose && err.error ? err.error : 'Internal Server Error',
     ...(err.expose && err.code && { code: err.code }),
+    // e.g. the record a 409 clashed with, so the app can offer to merge.
+    ...(err.expose && err.data !== undefined && { data: err.data }),
     ...(err.expose && err.message && { message: err.message }),
     ...(!err.expose &&
       process.env.NODE_ENV === 'development' && { message: err.message }),

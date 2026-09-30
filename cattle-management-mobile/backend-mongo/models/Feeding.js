@@ -38,6 +38,13 @@ const feedingSchema = new mongoose.Schema({
   notes: {
     type: String,
     trim: true
+  },
+  // Unique id the app puts on a new record, so a save retried after a timeout
+  // returns the first copy instead of creating a second one.
+  client_id: {
+    type: String,
+    trim: true,
+    maxlength: LIMITS.CLIENT_ID_MAX,
   }
 }, {
   timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' }
@@ -68,5 +75,6 @@ feedingSchema.pre('save', function (next) {
 feedingSchema.index({ cattle_id: 1, date_recorded: -1 });
 feedingSchema.index({ date_recorded: -1 });
 feedingSchema.index({ feed_type: 1 });
+feedingSchema.index({ client_id: 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.model('Feeding', feedingSchema);

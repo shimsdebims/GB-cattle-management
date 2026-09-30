@@ -32,7 +32,37 @@ export interface SyncState {
   pendingCount: number;
   /** Operations the server rejected permanently; they need user attention. */
   failedCount: number;
+  /** Milk entries that clashed with the server's; he decides which to keep. */
+  conflictCount: number;
   lastSyncAt: number | null;
+}
+
+/**
+ * A milk entry from this phone that met a different record on the server for
+ * the same cow and day. Kept until he chooses: keep the server's, use this
+ * phone's, or add the two together. Never dropped silently.
+ */
+export interface MilkConflict {
+  id: string;
+  cattle_id: string;
+  date_recorded: string;
+  /** What this phone tried to save. */
+  mine: {
+    quantity_liters?: number | null;
+    morning_liters?: number | null;
+    evening_liters?: number | null;
+  };
+  /** The server's record at the time of the clash (cattle_id populated). */
+  server: {
+    _id: string;
+    date_recorded: string;
+    quantity_liters: number;
+    morning_liters?: number | null;
+    evening_liters?: number | null;
+    updated_at: string;
+    cattle_id: string | { _id: string; tag_number: string; name: string };
+  };
+  createdAt: number;
 }
 
 // ─── Storage keys ────────────────────────────────────────────────────────────
@@ -49,6 +79,7 @@ const QUEUE_KEY = 'sync:queue';
 const FAILED_KEY = 'sync:failed';
 const ID_MAP_KEY = 'sync:idmap';
 const LAST_SYNC_KEY = 'sync:lastSyncAt';
+const CONFLICTS_KEY = 'sync:conflicts';
 
 // ─── Temporary ids ───────────────────────────────────────────────────────────
 
@@ -64,6 +95,15 @@ export function newTempId(): string {
 
 export const isTempId = (id: string): boolean =>
   typeof id === 'string' && id.startsWith(TEMP_PREFIX);
+
+/**
+ * Id sent with every new record. The server stores it and answers a retry
+ * carrying the same id with the record it already made, so a save that timed
+ * out and is sent again can never create a second copy.
+ */
+export function newClientId(): string {
+  return `c_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
+}
 
 // ─── Generic JSON storage ────────────────────────────────────────────────────
 
@@ -100,6 +140,7 @@ export async function clearAllCaches(): Promise<void> {
     FAILED_KEY,
     ID_MAP_KEY,
     LAST_SYNC_KEY,
+    CONFLICTS_KEY,
   ]);
 }
 
@@ -129,6 +170,14 @@ export async function enqueue(
   });
   await writeQueue(queue);
 }
+
+// ─── Milk conflicts ──────────────────────────────────────────────────────────
+
+export const readConflicts = (): Promise<MilkConflict[]> =>
+  readJson<MilkConflict[]>(CONFLICTS_KEY, []);
+
+export const writeConflicts = (items: MilkConflict[]): Promise<void> =>
+  writeJson(CONFLICTS_KEY, items);
 
 // ─── Temp-id → server-id map ─────────────────────────────────────────────────
 
@@ -170,6 +219,7 @@ let state: SyncState = {
   isSyncing: false,
   pendingCount: 0,
   failedCount: 0,
+  conflictCount: 0,
   lastSyncAt: null,
 };
 
@@ -199,15 +249,17 @@ export function subscribeToSyncState(listener: Listener): () => void {
 
 /** Recomputes queue counters from storage and publishes them. */
 export async function refreshQueueCounters(): Promise<void> {
-  const [queue, failed, lastSyncAt] = await Promise.all([
+  const [queue, failed, conflicts, lastSyncAt] = await Promise.all([
     readQueue(),
     readFailed(),
+    readConflicts(),
     readLastSync(),
   ]);
 
   setSyncState({
     pendingCount: queue.length,
     failedCount: failed.length,
+    conflictCount: conflicts.length,
     lastSyncAt,
   });
 }

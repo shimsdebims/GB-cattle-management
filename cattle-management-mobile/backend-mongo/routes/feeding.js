@@ -15,6 +15,7 @@ const {
   validationMiddleware,
   validateIdParam,
 } = require('../middleware');
+const { cleanClientId, createOnce } = require('../utils/idempotency');
 
 // GET /api/feeding — paginated list
 router.get(
@@ -151,17 +152,22 @@ router.post(
     if (!cattleExists) throw notFound('Cattle');
 
     // total_cost is derived by the model's pre-save hook.
-    const record = await Feeding.create({
-      cattle_id,
-      date_recorded,
-      feed_type,
-      quantity_kg,
-      cost_per_unit,
-      supplier,
-      notes,
-    });
+    const clientId = cleanClientId(req.body.client_id);
+    const { record, replayed } = await createOnce(Feeding, clientId, () =>
+      Feeding.create({
+        cattle_id,
+        date_recorded,
+        feed_type,
+        quantity_kg,
+        cost_per_unit,
+        supplier,
+        notes,
+        client_id: clientId,
+      })
+    );
 
     await record.populate('cattle_id', 'tag_number name breed');
+    if (replayed) return ok(res, record.toJSON(), 'Feeding record already saved');
     return created(res, record.toJSON(), 'Feeding record created');
   })
 );

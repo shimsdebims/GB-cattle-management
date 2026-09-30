@@ -88,6 +88,13 @@ const cattleSchema = new mongoose.Schema({
     type: String,
     trim: true,
     maxlength: LIMITS.NOTES_MAX,
+  },
+  // Unique id the app puts on a new record, so a save retried after a timeout
+  // returns the first copy instead of creating a second one.
+  client_id: {
+    type: String,
+    trim: true,
+    maxlength: LIMITS.CLIENT_ID_MAX,
   }
 }, {
   timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' }
@@ -99,6 +106,7 @@ const cattleSchema = new mongoose.Schema({
 cattleSchema.index({ current_status: 1, created_at: -1 });
 cattleSchema.index({ health_status: 1 });
 cattleSchema.index({ breed: 1 });
+cattleSchema.index({ client_id: 1 }, { unique: true, sparse: true });
 
 // Virtual for age calculation
 cattleSchema.virtual('age_in_months').get(function() {

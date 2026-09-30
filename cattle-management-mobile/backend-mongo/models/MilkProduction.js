@@ -20,6 +20,19 @@ const milkProductionSchema = new mongoose.Schema({
     min: 0,
     max: LIMITS.MILK_QUANTITY_MAX,
   },
+  // Optional split for farms that milk twice a day. When either is given the
+  // route stores quantity_liters as their sum, so every total, grid and income
+  // figure keeps reading one field.
+  morning_liters: {
+    type: Number,
+    min: 0,
+    max: LIMITS.MILK_QUANTITY_MAX,
+  },
+  evening_liters: {
+    type: Number,
+    min: 0,
+    max: LIMITS.MILK_QUANTITY_MAX,
+  },
   quality_score: {
     type: Number,
     min: LIMITS.QUALITY_SCORE_MIN,
@@ -35,6 +48,13 @@ const milkProductionSchema = new mongoose.Schema({
     type: String,
     trim: true,
     maxlength: LIMITS.NOTES_MAX,
+  },
+  // Unique id the app puts on a new record, so a save retried after a timeout
+  // returns the first copy instead of creating a second one.
+  client_id: {
+    type: String,
+    trim: true,
+    maxlength: LIMITS.CLIENT_ID_MAX,
   }
 }, {
   timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' }
@@ -69,6 +89,7 @@ milkProductionSchema.pre('findOneAndUpdate', function (next) {
 milkProductionSchema.index({ cattle_id: 1, date_recorded: 1 }, { unique: true });
 // Supports month-range scans and the newest-first list query.
 milkProductionSchema.index({ date_recorded: -1 });
+milkProductionSchema.index({ client_id: 1 }, { unique: true, sparse: true });
 
 milkProductionSchema.statics.startOfUtcDay = startOfUtcDay;
 

@@ -74,7 +74,10 @@ export interface MilkProduction extends Timestamped {
   _id: string;
   cattle_id: CattleRef;
   date_recorded: string;
+  /** The day's total: morning + evening when either is recorded. */
   quantity_liters: number;
+  morning_liters?: number | null;
+  evening_liters?: number | null;
   quality_score?: number;
   /** Price in force on that day, stored by the server. */
   price_per_liter?: number;
@@ -136,14 +139,23 @@ export interface CattleFormData {
   purchase_price?: number;
   current_status: CattleStatus;
   notes?: string;
+  /** Set by the offline layer on create so a retry can't double the record. */
+  client_id?: string;
 }
 
 export interface MilkFormData {
   cattle_id: string;
   date_recorded: string;
-  quantity_liters: number;
+  /** Ignored by the server when a morning or evening amount is given. */
+  quantity_liters?: number | null;
+  morning_liters?: number | null;
+  evening_liters?: number | null;
   quality_score?: number;
   notes?: string;
+  /** Edits only: the updated_at this phone last saw; a mismatch is a conflict. */
+  expected_updated_at?: string;
+  /** Set by the offline layer on create so a retry can't double the record. */
+  client_id?: string;
 }
 
 export interface FeedingFormData {
@@ -154,6 +166,8 @@ export interface FeedingFormData {
   cost_per_unit?: number;
   supplier?: string;
   notes?: string;
+  /** Set by the offline layer on create so a retry can't double the record. */
+  client_id?: string;
 }
 
 export interface ExpenseFormData {
@@ -166,6 +180,8 @@ export interface ExpenseFormData {
   supplier?: string;
   receipt_number?: string;
   notes?: string;
+  /** Set by the offline layer on create so a retry can't double the record. */
+  client_id?: string;
 }
 
 export interface RevenueFormData {
@@ -174,6 +190,8 @@ export interface RevenueFormData {
   description: string;
   amount: number;
   notes?: string;
+  /** Set by the offline layer on create so a retry can't double the record. */
+  client_id?: string;
 }
 
 // ─── Aggregate responses ─────────────────────────────────────────────────────
@@ -259,7 +277,8 @@ export interface MonthlyGridCow {
   name: string;
   tag: string;
   /** Length equals days_in_month. */
-  daily: number[];
+  /** null = no record that day; 0 = a recorded 0 L day. */
+  daily: (number | null)[];
   total: number;
   average: number;
 }
@@ -268,7 +287,7 @@ export interface MonthlyGrid {
   month: string;
   days_in_month: number;
   cows: MonthlyGridCow[];
-  daily_totals: number[];
+  daily_totals: (number | null)[];
   grand_total: number;
 }
 
