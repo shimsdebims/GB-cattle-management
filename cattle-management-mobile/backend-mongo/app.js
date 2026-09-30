@@ -49,14 +49,22 @@ function createApp({ enableLogging = true } = {}) {
   // proxied requests and the API fails with ERR_ERL_UNEXPECTED_X_FORWARDED_FOR.
   app.set('trust proxy', 1);
 
-  const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:19006,http://localhost:3000').split(',').map((entry) => entry.trim()).filter(Boolean);
+  const configuredOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:19006,http://localhost:3000')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  const allowedOrigins = new Set([
+    ...configuredOrigins,
+    'https://gb-cattle-management.vercel.app',
+    'https://gb-cattle-management-k5nur9e06-shimsdebims.vercel.app',
+  ]);
 
   app.use(helmet());
   app.use(
     cors({
       origin(origin, callback) {
         if (!origin) return callback(null, true);
-        if (allowedOrigins.includes(origin)) return callback(null, true);
+        if (allowedOrigins.has(origin)) return callback(null, true);
         return callback(new Error('Not allowed by CORS'));
       },
       credentials: true,
