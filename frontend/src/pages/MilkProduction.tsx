@@ -20,18 +20,32 @@ import {
   IconButton,
   Grid,
   CircularProgress,
+  Snackbar,
+  Alert,
 } from '@mui/material';
 import { Add, Edit, Delete } from '@mui/icons-material';
-import { milkAPI, cattleAPI } from '../services/api';
-import { MilkProduction as MilkProductionType, Cattle } from '../types';
+import { milkAPI, cattleAPI, describeApiError } from '../services/api';
+import { MilkProduction as MilkProductionType, Cattle, cattleIdOf } from '../types';
 
 interface MilkFormData {
-  cattle_id: number;
+  cattle_id: string;
   date_recorded: string;
   quantity_liters: number;
   quality_score?: number;
   notes?: string;
 }
+
+/** Today's local calendar date as YYYY-MM-DD (toISOString would shift to UTC). */
+const todayLocal = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+/** Records are stored at UTC midnight; show that calendar day, not the local shift. */
+const formatDay = (iso: string) => {
+  const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString();
+};
 
 const MilkProduction: React.FC = () => {
   const [milkRecords, setMilkRecords] = useState<MilkProductionType[]>([]);
@@ -39,9 +53,11 @@ const MilkProduction: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<MilkProductionType | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState<MilkFormData>({
-    cattle_id: 0,
-    date_recorded: new Date().toISOString().split('T')[0],
+    cattle_id: '',
+    date_recorded: todayLocal(),
     quantity_liters: 0,
   });
 
@@ -56,10 +72,15 @@ const MilkProduction: React.FC = () => {
         milkAPI.getAll(),
         cattleAPI.getAll(),
       ]);
-      setMilkRecords(milkResponse.data);
-      setCattle(cattleResponse.data.filter(c => c.current_status === 'Active'));
-    } catch (error) {
-      console.error('Error fetching data:', error);
+      setMilkRecords(Array.isArray(milkResponse.data) ? milkResponse.data : []);
+      setCattle(
+        (Array.isArray(cattleResponse.data) ? cattleResponse.data : []).filter(
+          (c) => c.current_status === 'Active' && c.gender === 'Female'
+        )
+      );
+    } catch (err) {
+      console.error('Error fetching data:', err);
+      setError(describeApiError(err, 'Unable to load milk records right now.'));
     } finally {
       setLoading(false);
     }
@@ -69,8 +90,8 @@ const MilkProduction: React.FC = () => {
     if (record) {
       setEditingRecord(record);
       setFormData({
-        cattle_id: record.cattle_id,
-        date_recorded: record.date_recorded,
+        cattle_id: cattleIdOf(record.cattle_id),
+        date_recorded: record.date_recorded.slice(0, 10),
         quantity_liters: record.quantity_liters,
         quality_score: record.quality_score,
         notes: record.notes || '',
@@ -78,8 +99,8 @@ const MilkProduction: React.FC = () => {
     } else {
       setEditingRecord(null);
       setFormData({
-        cattle_id: cattle[0]?.id || 0,
-        date_recorded: new Date().toISOString().split('T')[0],
+        cattle_id: cattle[0]?._id || '',
+        date_recorded: todayLocal(),
         quantity_liters: 0,
       });
     }
@@ -96,32 +117,50 @@ const MilkProduction: React.FC = () => {
   };
 
   const handleSubmit = async () => {
+    if (saving) return;
+    setError(null);
+    setSaving(true);
     try {
-      if (editingRecord) {
-        await milkAPI.update(editingRecord.id, formData);
-      } else {
-        await milkAPI.create(formData);
+      const payload: Record<string, unknown> = {
+        cattle_id: formData.cattle_id,
+        date_recorded: formData.date_recorded,
+        quantity_liters: formData.quantity_liters,
+      };
+      if (formData.quality_score && !Number.isNaN(formData.quality_score)) {
+        payload.quality_score = formData.quality_score;
       }
-      await fetchData();
+      if (formData.notes?.trim()) payload.notes = formData.notes.trim();
+
+      if (editingRecord) {
+        await milkAPI.update(editingRecord._id, payload);
+      } else {
+        await milkAPI.create(payload);
+      }
       handleCloseDialog();
-    } catch (error) {
-      console.error('Error saving milk record:', error);
+      await fetchData();
+    } catch (err) {
+      console.error('Error saving milk record:', err);
+      setError(describeApiError(err, 'The milk record could not be saved.'));
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: string) => {
     if (window.confirm('Are you sure you want to delete this milk record?')) {
       try {
         await milkAPI.delete(id);
         await fetchData();
-      } catch (error) {
-        console.error('Error deleting milk record:', error);
+      } catch (err) {
+        console.error('Error deleting milk record:', err);
+        setError(describeApiError(err, 'The milk record could not be deleted.'));
       }
     }
   };
 
-  const getCattleName = (cattleId: number) => {
-    const cow = cattle.find(c => c.id === cattleId);
+  const getCattleName = (ref: MilkProductionType['cattle_id']) => {
+    if (ref && typeof ref !== 'string') return `${ref.name} (${ref.tag_number})`;
+    const cow = cattle.find((c) => c._id === ref);
     return cow ? `${cow.name} (${cow.tag_number})` : 'Unknown';
   };
 
@@ -171,9 +210,9 @@ const MilkProduction: React.FC = () => {
           </TableHead>
           <TableBody>
             {milkRecords.map((record) => (
-              <TableRow key={record.id} sx={{ '&:hover': { backgroundColor: '#001E2B' } }}>
+              <TableRow key={record._id} sx={{ '&:hover': { backgroundColor: '#001E2B' } }}>
                 <TableCell sx={{ color: '#C1C7CD' }}>
-                  {new Date(record.date_recorded).toLocaleDateString()}
+                  {formatDay(record.date_recorded)}
                 </TableCell>
                 <TableCell sx={{ color: '#C1C7CD' }}>
                   {getCattleName(record.cattle_id)}
@@ -211,7 +250,7 @@ const MilkProduction: React.FC = () => {
                   </IconButton>
                   <IconButton
                     size="small"
-                    onClick={() => handleDelete(record.id)}
+                    onClick={() => handleDelete(record._id)}
                     sx={{ color: '#FF6B6B' }}
                   >
                     <Delete fontSize="small" />
@@ -247,11 +286,11 @@ const MilkProduction: React.FC = () => {
                 select
                 label="Cattle"
                 value={formData.cattle_id}
-                onChange={(e) => handleInputChange('cattle_id', parseInt(e.target.value))}
+                onChange={(e) => handleInputChange('cattle_id', e.target.value)}
                 required
               >
                 {cattle.map((cow) => (
-                  <MenuItem key={cow.id} value={cow.id}>
+                  <MenuItem key={cow._id} value={cow._id}>
                     {cow.name} ({cow.tag_number}) - {cow.breed}
                   </MenuItem>
                 ))}
@@ -307,11 +346,22 @@ const MilkProduction: React.FC = () => {
           <Button onClick={handleCloseDialog} sx={{ color: '#C1C7CD' }}>
             Cancel
           </Button>
-          <Button onClick={handleSubmit} variant="contained">
-            {editingRecord ? 'Update' : 'Create'}
+          <Button onClick={handleSubmit} variant="contained" disabled={saving || !formData.cattle_id}>
+            {saving ? <CircularProgress size={20} color="inherit" /> : editingRecord ? 'Update' : 'Create'}
           </Button>
         </DialogActions>
       </Dialog>
+
+      <Snackbar
+        open={Boolean(error)}
+        autoHideDuration={6000}
+        onClose={() => setError(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity="error" onClose={() => setError(null)} sx={{ width: '100%' }}>
+          {error}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 };

@@ -21,7 +21,7 @@ import {
 } from '@mui/material';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { Add, Edit, Delete, Visibility } from '@mui/icons-material';
-import { cattleAPI } from '../services/api';
+import { cattleAPI, describeApiError } from '../services/api';
 import { Cattle } from '../types';
 
 interface CattleFormData {
@@ -45,6 +45,7 @@ const CattleManagement: React.FC = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingCattle, setEditingCattle] = useState<Cattle | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const isMobile = useMediaQuery('(max-width: 768px)');
   const [formData, setFormData] = useState<CattleFormData>({
     tag_number: '',
@@ -56,7 +57,8 @@ const CattleManagement: React.FC = () => {
     current_status: 'Active',
   });
 
-  const breeds = ['Holstein', 'Jersey', 'Angus', 'Hereford', 'Brahman', 'Simmental', 'Charolais', 'Other'];
+  // Must match BREEDS in backend-mongo/constants/domain.js, or the API rejects the value.
+  const breeds = ['Holstein', 'Jersey', 'Angus', 'Hereford', 'Brahman', 'Simmental', 'Charolais', 'Limousin', 'Guernsey', 'Ankole', 'Other'];
   const healthStatuses = ['Healthy', 'Sick', 'Injured', 'Pregnant', 'Recovering'];
   const statuses = ['Active', 'Sold', 'Deceased', 'Quarantined'];
 
@@ -68,10 +70,10 @@ const CattleManagement: React.FC = () => {
     try {
       setLoading(true);
       const response = await cattleAPI.getAll();
-      setCattle(response.data);
+      setCattle(Array.isArray(response.data) ? response.data : []);
     } catch (error) {
       console.error('Error fetching cattle:', error);
-      setSaveError('Unable to load cattle records right now. Please check your connection and try again.');
+      setSaveError(describeApiError(error, 'Unable to load cattle records right now.'));
     } finally {
       setLoading(false);
     }
@@ -118,31 +120,49 @@ const CattleManagement: React.FC = () => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
+  /** Drop blank optional fields and NaN numbers so the API validators don't reject them. */
+  const buildPayload = (): Record<string, unknown> => {
+    const payload: Record<string, unknown> = {};
+    (Object.keys(formData) as (keyof CattleFormData)[]).forEach((key) => {
+      const value = formData[key];
+      if (value === undefined || value === null) return;
+      if (typeof value === 'string' && value.trim() === '') return;
+      if (typeof value === 'number' && Number.isNaN(value)) return;
+      payload[key] = typeof value === 'string' ? value.trim() : value;
+    });
+    return payload;
+  };
+
   const handleSubmit = async () => {
+    if (saving) return;
     setSaveError(null);
+    setSaving(true);
 
     try {
+      const payload = buildPayload();
       if (editingCattle) {
-        await cattleAPI.update(editingCattle.id, formData);
+        await cattleAPI.update(editingCattle._id, payload);
       } else {
-        await cattleAPI.create(formData);
+        await cattleAPI.create(payload);
       }
-      await fetchCattle();
       handleCloseDialog();
-    } catch (error: any) {
+      await fetchCattle();
+    } catch (error) {
       console.error('Error saving cattle:', error);
-      const message = error?.response?.data?.message || error?.message || 'The cattle record could not be saved.';
-      setSaveError(message);
+      setSaveError(describeApiError(error, 'The cattle record could not be saved.'));
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: string) => {
     if (window.confirm('Are you sure you want to delete this cattle record?')) {
       try {
         await cattleAPI.delete(id);
         await fetchCattle();
       } catch (error) {
         console.error('Error deleting cattle:', error);
+        setSaveError(describeApiError(error, 'The cattle record could not be deleted.'));
       }
     }
   };
@@ -208,7 +228,7 @@ const CattleManagement: React.FC = () => {
 
       <Grid container spacing={3}>
         {cattle.map((cow) => (
-          <Grid item xs={12} sm={6} md={4} key={cow.id}>
+          <Grid item xs={12} sm={6} md={4} key={cow._id}>
             <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 220 }}>
               <CardContent sx={{ flexGrow: 1 }}>
                 <Box display="flex" justifyContent="space-between" alignItems="start" mb={2}>
@@ -257,7 +277,7 @@ const CattleManagement: React.FC = () => {
                   </IconButton>
                   <IconButton
                     size="small"
-                    onClick={() => handleDelete(cow.id)}
+                    onClick={() => handleDelete(cow._id)}
                     sx={{ color: '#FF6B6B' }}
                   >
                     <Delete fontSize="small" />
@@ -437,8 +457,8 @@ const CattleManagement: React.FC = () => {
           <Button onClick={handleCloseDialog} sx={{ color: '#C1C7CD', width: { xs: '100%', sm: 'auto' } }}>
             Cancel
           </Button>
-          <Button onClick={handleSubmit} variant="contained" sx={{ width: { xs: '100%', sm: 'auto' } }}>
-            {editingCattle ? 'Update' : 'Create'}
+          <Button onClick={handleSubmit} variant="contained" disabled={saving} sx={{ width: { xs: '100%', sm: 'auto' } }}>
+            {saving ? <CircularProgress size={20} color="inherit" /> : editingCattle ? 'Update' : 'Create'}
           </Button>
         </DialogActions>
       </Dialog>

@@ -7,10 +7,11 @@ import {
   Box,
   Paper,
   CircularProgress,
+  Alert,
 } from '@mui/material';
 import { Pets, LocalDrink, TrendingUp } from '@mui/icons-material';
-import { cattleAPI, milkAPI, financialAPI } from '../services/api';
-import { Cattle, MilkSummary, FinancialSummary } from '../types';
+import { analyticsAPI, describeApiError } from '../services/api';
+import { DashboardSummary, MilkTrends } from '../types';
 
 interface StatsCard {
   title: string;
@@ -19,35 +20,28 @@ interface StatsCard {
   color: string;
 }
 
+const formatFBu = (amount: number) => `${Math.round(amount).toLocaleString('en-US')} FBu`;
+
 const Dashboard: React.FC = () => {
-  const [cattle, setCattle] = useState<Cattle[]>([]);
-  const [milkSummary, setMilkSummary] = useState<MilkSummary[]>([]);
-  const [financialSummary, setFinancialSummary] = useState<FinancialSummary | null>(null);
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [trends, setTrends] = useState<MilkTrends | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchDashboardData = async () => {
       try {
         setLoading(true);
-        
-        // Fetch cattle data
-        const cattleResponse = await cattleAPI.getAll();
-        setCattle(cattleResponse.data);
-
-        // Fetch milk summary for last 30 days
-        const milkResponse = await milkAPI.getSummary({ days: 30 });
-        setMilkSummary(milkResponse.data);
-
-        // Fetch financial summary for last 30 days
-        const today = new Date();
-        const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
-        const financialResponse = await financialAPI.getSummary({
-          start_date: thirtyDaysAgo.toISOString().split('T')[0],
-          end_date: today.toISOString().split('T')[0],
-        });
-        setFinancialSummary(financialResponse.data);
-      } catch (error) {
-        console.error('Error fetching dashboard data:', error);
+        // Totals are aggregated server-side, so they stay correct past one page of records.
+        const [summaryResponse, trendsResponse] = await Promise.all([
+          analyticsAPI.dashboard({ days: 30 }),
+          analyticsAPI.milkTrends({ days: 30 }),
+        ]);
+        setSummary(summaryResponse.data);
+        setTrends(trendsResponse.data);
+      } catch (err) {
+        console.error('Error fetching dashboard data:', err);
+        setError(describeApiError(err, 'Could not load the dashboard.'));
       } finally {
         setLoading(false);
       }
@@ -56,10 +50,12 @@ const Dashboard: React.FC = () => {
     fetchDashboardData();
   }, []);
 
-  const totalCattle = cattle.length;
-  const activeCattle = cattle.filter(c => c.current_status === 'Active').length;
-  const totalMilkProduction = milkSummary.reduce((sum, cow) => sum + cow.total_liters, 0);
-  const averageDailyProduction = milkSummary.reduce((sum, cow) => sum + cow.average_daily_liters, 0);
+  const totalCattle = summary?.cattle.total_cattle ?? 0;
+  const activeCattle = summary?.cattle.active_cattle ?? 0;
+  const totalMilkProduction = summary?.milk_production.total_liters ?? 0;
+  const averageDailyProduction = summary?.milk_production.average_daily_liters ?? 0;
+  const financialSummary = summary?.financial;
+  const topProducers = trends?.cattle_performance ?? [];
 
   const statsCards: StatsCard[] = [
     {
@@ -101,6 +97,12 @@ const Dashboard: React.FC = () => {
       <Typography variant="h4" gutterBottom>
         Dashboard
       </Typography>
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          {error}
+        </Alert>
+      )}
       
       {/* Stats Cards */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
@@ -137,19 +139,22 @@ const Dashboard: React.FC = () => {
               </Typography>
               <Box sx={{ mt: 2 }}>
                 <Typography variant="body1">
-                  <strong>Total Revenue:</strong> ${financialSummary.total_revenue.toFixed(2)}
+                  <strong>Milk revenue:</strong> {formatFBu(financialSummary.milk_revenue)}
                 </Typography>
                 <Typography variant="body1" sx={{ mt: 1 }}>
-                  <strong>Total Expenses:</strong> ${financialSummary.total_expenses.toFixed(2)}
+                  <strong>Other revenue:</strong> {formatFBu(financialSummary.other_revenue)}
                 </Typography>
-                <Typography 
-                  variant="h6" 
-                  sx={{ 
-                    mt: 2, 
-                    color: financialSummary.net_income >= 0 ? 'green' : 'red' 
+                <Typography variant="body1" sx={{ mt: 1 }}>
+                  <strong>Expenses:</strong> {formatFBu(financialSummary.total_expenses)}
+                </Typography>
+                <Typography
+                  variant="h6"
+                  sx={{
+                    mt: 2,
+                    color: financialSummary.net_profit >= 0 ? '#00ED64' : '#FF6B6B'
                   }}
                 >
-                  <strong>Net Income:</strong> ${financialSummary.net_income.toFixed(2)}
+                  <strong>Net profit:</strong> {formatFBu(financialSummary.net_profit)}
                 </Typography>
               </Box>
             </Paper>
@@ -161,16 +166,18 @@ const Dashboard: React.FC = () => {
                 Top Milk Producers (Last 30 Days)
               </Typography>
               <Box sx={{ mt: 2 }}>
-                {milkSummary
-                  .sort((a, b) => b.total_liters - a.total_liters)
-                  .slice(0, 5)
-                  .map((cow, index) => (
-                    <Box key={cow.cattle_id} sx={{ mb: 1 }}>
-                      <Typography variant="body2">
-                        <strong>{index + 1}. {cow.cattle_name} ({cow.tag_number}):</strong> {cow.total_liters.toFixed(1)} L
-                      </Typography>
-                    </Box>
-                  ))}
+                {topProducers.length === 0 && (
+                  <Typography variant="body2" color="textSecondary">
+                    No milk recorded in the last 30 days.
+                  </Typography>
+                )}
+                {topProducers.slice(0, 5).map((cow, index) => (
+                  <Box key={cow.cattle_id} sx={{ mb: 1 }}>
+                    <Typography variant="body2">
+                      <strong>{index + 1}. {cow.name} ({cow.tag_number}):</strong> {cow.total_quantity.toFixed(1)} L
+                    </Typography>
+                  </Box>
+                ))}
               </Box>
             </Paper>
           </Grid>
