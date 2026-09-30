@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -13,6 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Alert } from '../utils/alert';
 import { MaterialIcons } from '@expo/vector-icons';
 
 import { ApiError, analyticsAPI, financialAPI } from '../services/api';

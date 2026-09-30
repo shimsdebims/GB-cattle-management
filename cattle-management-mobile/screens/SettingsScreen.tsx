@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -11,6 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Alert } from '../utils/alert';
 import { MaterialIcons } from '@expo/vector-icons';
 
 import { API_BASE_URL, ApiError, settingsAPI } from '../services/api';

@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -11,10 +10,12 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Alert } from '../utils/alert';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 
+import WebDateInput from '../components/WebDateInput';
 import { ApiError } from '../services/api';
 import { offlineApi } from '../services/offlineApi';
 import { useOfflineAPI } from '../hooks/useOfflineAPI';
@@ -64,6 +65,10 @@ const AddCattleScreen = () => {
       );
     }
     if (!name.trim()) return Alert.alert('Validation', 'Name is required.');
+    // The web date field can be cleared, which leaves an empty string.
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOfBirth) || dateOfBirth > todayDateOnly()) {
+      return Alert.alert('Validation', 'Enter a date of birth that is not in the future.');
+    }
 
     const weightValue = weight ? Number(weight) : undefined;
     if (weightValue !== undefined && (Number.isNaN(weightValue) || weightValue <= 0)) {
@@ -150,13 +155,22 @@ const AddCattleScreen = () => {
         </Field>
 
         <Field label="Date of birth">
-          <TouchableOpacity
-            style={styles.dateButton}
-            onPress={() => setShowDatePicker(true)}
-          >
-            <Text style={styles.dateText}>{formatDate(dateOfBirth)}</Text>
-            <MaterialIcons name="calendar-today" size={18} color={colors.primary} />
-          </TouchableOpacity>
+          {Platform.OS === 'web' ? (
+            <WebDateInput
+              value={dateOfBirth}
+              onChange={setDateOfBirth}
+              max={todayDateOnly()}
+              accessibilityLabel="Date of birth"
+            />
+          ) : (
+            <TouchableOpacity
+              style={styles.dateButton}
+              onPress={() => setShowDatePicker(true)}
+            >
+              <Text style={styles.dateText}>{formatDate(dateOfBirth)}</Text>
+              <MaterialIcons name="calendar-today" size={18} color={colors.primary} />
+            </TouchableOpacity>
+          )}
         </Field>
 
         <Field label="Weight (kg)">

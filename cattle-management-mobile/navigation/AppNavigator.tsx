@@ -119,6 +119,11 @@ const AppNavigator = () => {
     <NavigationContainer>
       <Stack.Navigator
         screenOptions={{
+          // On the web a stack card otherwise grows to its content's height,
+          // so its ScrollView never scrolls and the page cannot either: the
+          // bottom of the cow card and Settings was unreachable on iPhone.
+          cardStyle: { flex: 1 },
+          headerBackTitle: 'Back',
           headerStyle: {
             backgroundColor: colors.header,
           },
