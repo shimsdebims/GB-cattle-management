@@ -64,6 +64,36 @@ describe('API authentication', () => {
 
     expect(deploymentResponse.status).toBe(204);
     expect(deploymentResponse.headers['access-control-allow-origin']).toBe('https://gb-cattle-management-k5nur9e06-shimsdebims.vercel.app');
+
+    // A later deploy gets a new hash and must keep working without a code change.
+    const nextDeploy = 'https://gb-cattle-management-a1b2c3d4e-shimsdebims.vercel.app';
+    const nextResponse = await request(app)
+      .options('/api/cattle')
+      .set('Origin', nextDeploy)
+      .set('Access-Control-Request-Method', 'POST');
+    expect(nextResponse.status).toBe(204);
+    expect(nextResponse.headers['access-control-allow-origin']).toBe(nextDeploy);
+  });
+
+  test('does not grant CORS to unrelated origins, and does not 500', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.ALLOWED_ORIGINS = 'http://localhost:19006';
+    delete process.env.ENABLE_API_AUTH;
+
+    const app = createApp({ enableLogging: false });
+    for (const origin of [
+      'https://evil.example.com',
+      'https://gb-cattle-management.vercel.app.evil.com',
+      'https://other-project-abc123-shimsdebims.vercel.app',
+      'https://gb-cattle-management-abc123-someoneelse.vercel.app',
+    ]) {
+      const response = await request(app)
+        .options('/api/cattle')
+        .set('Origin', origin)
+        .set('Access-Control-Request-Method', 'POST');
+      expect(response.status).toBeLessThan(500);
+      expect(response.headers['access-control-allow-origin']).toBeUndefined();
+    }
   });
 
   test('accepts proxied requests behind Render without x-forwarded-for errors', async () => {

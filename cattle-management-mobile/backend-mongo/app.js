@@ -56,16 +56,26 @@ function createApp({ enableLogging = true } = {}) {
   const allowedOrigins = new Set([
     ...configuredOrigins,
     'https://gb-cattle-management.vercel.app',
-    'https://gb-cattle-management-k5nur9e06-shimsdebims.vercel.app',
   ]);
+
+  // Every Vercel deploy gets its own URL (<project>-<hash>-<scope>.vercel.app),
+  // so pinning one hash breaks on the next push. Allow only this project under
+  // this account's scope — still an explicit allow-list, not a wildcard.
+  const allowedOriginPatterns = [
+    /^https:\/\/gb-cattle-management-[a-z0-9-]+-shimsdebims\.vercel\.app$/,
+  ];
+  const isAllowedOrigin = (origin) =>
+    allowedOrigins.has(origin) || allowedOriginPatterns.some((re) => re.test(origin));
 
   app.use(helmet());
   app.use(
     cors({
       origin(origin, callback) {
         if (!origin) return callback(null, true);
-        if (allowedOrigins.has(origin)) return callback(null, true);
-        return callback(new Error('Not allowed by CORS'));
+        if (isAllowedOrigin(origin)) return callback(null, true);
+        // Deny without throwing: an Error here becomes a 500 with no CORS
+        // headers, which the browser reports as an opaque "Network Error".
+        return callback(null, false);
       },
       credentials: true,
     })
