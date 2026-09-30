@@ -75,6 +75,9 @@ export class ApiError extends Error {
   /** Machine-readable reason from the API, e.g. CATTLE_HAS_HISTORY. */
   code?: string;
 
+  /** Extra payload on some errors, e.g. the record a 409 clashed with. */
+  data?: unknown;
+
   constructor(
     message: string,
     {
@@ -82,11 +85,13 @@ export class ApiError extends Error {
       fieldErrors = [],
       isNetworkError = false,
       code,
+      data,
     }: {
       status?: number;
       fieldErrors?: FieldError[];
       isNetworkError?: boolean;
       code?: string;
+      data?: unknown;
     } = {}
   ) {
     super(message);
@@ -95,6 +100,7 @@ export class ApiError extends Error {
     this.fieldErrors = fieldErrors;
     this.isNetworkError = isNetworkError;
     this.code = code;
+    this.data = data;
   }
 
   /** Single string suitable for an Alert body. */
@@ -123,6 +129,7 @@ function toApiError(error: unknown): ApiError {
     status: response?.status ?? 0,
     fieldErrors: body?.errors ?? [],
     code: body?.code,
+    data: body?.data,
   });
 }
 

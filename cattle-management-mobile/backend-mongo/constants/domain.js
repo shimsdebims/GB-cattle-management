@@ -89,6 +89,7 @@ const LIMITS = {
   PASSWORD_MIN: 8,
   USERNAME_MIN: 3,
   USERNAME_MAX: 40,
+  CLIENT_ID_MAX: 64,
 };
 
 const DEFAULTS = {

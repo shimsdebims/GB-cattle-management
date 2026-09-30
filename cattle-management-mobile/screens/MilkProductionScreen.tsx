@@ -2,46 +2,38 @@ import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { Alert } from '../utils/alert';
 import { MaterialIcons } from '@expo/vector-icons';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { StackNavigationProp } from '@react-navigation/stack';
 
+import MilkConflicts from '../components/MilkConflicts';
 import SyncStatus from '../components/SyncStatus';
 import { ApiError } from '../services/api';
 import { offlineApi } from '../services/offlineApi';
 import { useOfflineAPI } from '../hooks/useOfflineAPI';
 import { formatLiters } from '../utils/formatCurrency';
-import { formatDate, todayDateOnly } from '../utils/date';
+import { formatDate } from '../utils/date';
 import { colors, radius, spacing } from '../constants/theme';
-import { LIMITS, cattleIdOf, type Cattle, type MilkProduction } from '../types';
+import { LIMITS, type Cattle, type MilkProduction } from '../types';
+import type { RootStackParamList } from '../navigation/AppNavigator';
+
+type Nav = StackNavigationProp<RootStackParamList>;
 
 const MilkProductionScreen = () => {
-  const { isOnline, forceSync } = useOfflineAPI();
+  const navigation = useNavigation<Nav>();
+  const { forceSync } = useOfflineAPI();
 
   const [records, setRecords] = useState<MilkProduction[]>([]);
   const [herd, setHerd] = useState<Cattle[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-
-  const [showModal, setShowModal] = useState(false);
-  const [saving, setSaving] = useState(false);
-
-  const [cattleId, setCattleId] = useState('');
-  const [quantity, setQuantity] = useState('');
-  const [quality, setQuality] = useState('');
-  const [notes, setNotes] = useState('');
-  const [date, setDate] = useState(todayDateOnly());
 
   const load = useCallback(async () => {
     try {
@@ -63,12 +55,6 @@ const MilkProductionScreen = () => {
     }, [load])
   );
 
-  /** Only active females are milked. */
-  const milkingHerd = useMemo(
-    () => herd.filter((cow) => cow.current_status === 'Active' && cow.gender === 'Female'),
-    [herd]
-  );
-
   const nameFor = useCallback(
     (ref: MilkProduction['cattle_id']) => {
       if (typeof ref !== 'string') return `${ref.tag_number} — ${ref.name}`;
@@ -83,75 +69,9 @@ const MilkProductionScreen = () => {
     [records]
   );
 
-  /** Warn before submitting a day that already has a record for this cow. */
-  const duplicateWarning = useMemo(() => {
-    if (!cattleId) return null;
-    const clash = records.find(
-      (record) =>
-        cattleIdOf(record.cattle_id) === cattleId &&
-        record.date_recorded.slice(0, 10) === date
-    );
-    return clash
-      ? `A record already exists for this cow on ${formatDate(date)}.`
-      : null;
-  }, [records, cattleId, date]);
-
-  const resetForm = () => {
-    setCattleId('');
-    setQuantity('');
-    setQuality('');
-    setNotes('');
-    setDate(todayDateOnly());
-  };
-
-  const handleSave = async () => {
-    const litres = parseFloat(quantity);
-
-    if (!cattleId) return Alert.alert('Validation', 'Select a cow.');
-    if (Number.isNaN(litres) || litres <= 0) {
-      return Alert.alert('Validation', 'Enter a quantity greater than zero.');
-    }
-    if (litres > LIMITS.MILK_QUANTITY_MAX) {
-      return Alert.alert(
-        'Validation',
-        `Quantity must not exceed ${LIMITS.MILK_QUANTITY_MAX} litres.`
-      );
-    }
-
-    const score = quality ? parseFloat(quality) : undefined;
-    if (
-      score !== undefined &&
-      (Number.isNaN(score) ||
-        score < LIMITS.QUALITY_SCORE_MIN ||
-        score > LIMITS.QUALITY_SCORE_MAX)
-    ) {
-      return Alert.alert(
-        'Validation',
-        `Quality must be between ${LIMITS.QUALITY_SCORE_MIN} and ${LIMITS.QUALITY_SCORE_MAX}.`
-      );
-    }
-
-    setSaving(true);
-    try {
-      await offlineApi.createMilk({
-        cattle_id: cattleId,
-        date_recorded: date,
-        quantity_liters: litres,
-        quality_score: score,
-        notes: notes.trim() || undefined,
-      });
-      setShowModal(false);
-      resetForm();
-      await load();
-    } catch (error) {
-      Alert.alert(
-        'Could not save',
-        error instanceof ApiError ? error.displayMessage : 'Please try again.'
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
+  /** Tapping a record opens its whole day, where any cow can be corrected. */
+  const openDay = (record?: MilkProduction) =>
+    navigation.navigate('MilkDay', record ? { date: String(record.date_recorded).slice(0, 10) } : undefined);
 
   const confirmDelete = (record: MilkProduction) => {
     Alert.alert('Delete milk record?', 'This cannot be undone.', [
@@ -160,7 +80,14 @@ const MilkProductionScreen = () => {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          await offlineApi.deleteMilk(record._id);
+          try {
+            await offlineApi.deleteMilk(record._id);
+          } catch (error) {
+            Alert.alert(
+              'Could not delete',
+              error instanceof ApiError ? error.displayMessage : 'Please try again.'
+            );
+          }
           await load();
         },
       },
@@ -187,8 +114,8 @@ const MilkProductionScreen = () => {
         <SyncStatus />
         <TouchableOpacity
           style={styles.addButton}
-          onPress={() => setShowModal(true)}
-          accessibilityLabel="Add milk record"
+          onPress={() => openDay()}
+          accessibilityLabel="Record today's milk"
         >
           <MaterialIcons name="add" size={24} color={colors.background} />
         </TouchableOpacity>
@@ -198,6 +125,15 @@ const MilkProductionScreen = () => {
         data={records}
         keyExtractor={(item) => item._id}
         contentContainerStyle={styles.list}
+        ListHeaderComponent={
+          <>
+            <MilkConflicts onResolved={load} />
+            <TouchableOpacity style={styles.dayButton} onPress={() => openDay()}>
+              <MaterialIcons name="playlist-add" size={20} color={colors.background} />
+              <Text style={styles.dayButtonText}>Record today's milk</Text>
+            </TouchableOpacity>
+          </>
+        }
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -212,14 +148,16 @@ const MilkProductionScreen = () => {
           <View style={styles.empty}>
             <MaterialIcons name="opacity" size={52} color={colors.borderStrong} />
             <Text style={styles.emptyText}>No milk records yet</Text>
-            <Text style={styles.emptyHint}>Tap + to record today's yield.</Text>
+            <Text style={styles.emptyHint}>Tap "Record today's milk" to start.</Text>
           </View>
         }
         renderItem={({ item }) => (
           <TouchableOpacity
             style={styles.card}
+            onPress={() => openDay(item)}
             onLongPress={() => confirmDelete(item)}
             delayLongPress={400}
+            accessibilityHint="Tap to edit this day, press and hold to delete"
           >
             <View style={styles.cardTop}>
               <Text style={styles.cardTitle} numberOfLines={1}>
@@ -232,6 +170,11 @@ const MilkProductionScreen = () => {
                 <MaterialIcons name="opacity" size={16} color={colors.cyan} />
                 <Text style={styles.metricText}>{formatLiters(item.quantity_liters)}</Text>
               </View>
+              {item.morning_liters != null || item.evening_liters != null ? (
+                <Text style={styles.metricText}>
+                  AM {item.morning_liters ?? '–'} · PM {item.evening_liters ?? '–'}
+                </Text>
+              ) : null}
               {item.quality_score != null && (
                 <View style={styles.metric}>
                   <MaterialIcons name="star" size={16} color="#FFD700" />
@@ -245,128 +188,6 @@ const MilkProductionScreen = () => {
           </TouchableOpacity>
         )}
       />
-
-      <Modal visible={showModal} animationType="slide" transparent>
-        <KeyboardAvoidingView
-          style={styles.overlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
-          <View style={styles.sheet}>
-            <Text style={styles.sheetTitle}>Add Milk Record</Text>
-
-            <ScrollView keyboardShouldPersistTaps="handled">
-              <Text style={styles.label}>Cow *</Text>
-              {milkingHerd.length === 0 ? (
-                <Text style={styles.hint}>
-                  No active female cattle. Add one on the Cattle tab first.
-                </Text>
-              ) : (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  <View style={styles.chipRow}>
-                    {milkingHerd.map((cow) => (
-                      <TouchableOpacity
-                        key={cow._id}
-                        style={[styles.chip, cattleId === cow._id && styles.chipActive]}
-                        onPress={() => setCattleId(cow._id)}
-                      >
-                        <Text
-                          style={[
-                            styles.chipText,
-                            cattleId === cow._id && styles.chipTextActive,
-                          ]}
-                        >
-                          {cow.tag_number}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </ScrollView>
-              )}
-
-              <Text style={styles.label}>Date</Text>
-              <TextInput
-                style={styles.input}
-                value={date}
-                onChangeText={setDate}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor={colors.textDisabled}
-              />
-
-              {duplicateWarning && (
-                <Text style={styles.warning}>
-                  <MaterialIcons name="warning" size={12} /> {duplicateWarning}
-                </Text>
-              )}
-
-              <View style={styles.fieldRow}>
-                <View style={styles.field}>
-                  <Text style={styles.label}>Litres *</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={quantity}
-                    onChangeText={setQuantity}
-                    keyboardType="numeric"
-                    placeholder="e.g. 25.5"
-                    placeholderTextColor={colors.textDisabled}
-                  />
-                </View>
-                <View style={styles.field}>
-                  <Text style={styles.label}>
-                    Quality ({LIMITS.QUALITY_SCORE_MIN}–{LIMITS.QUALITY_SCORE_MAX})
-                  </Text>
-                  <TextInput
-                    style={styles.input}
-                    value={quality}
-                    onChangeText={setQuality}
-                    keyboardType="numeric"
-                    placeholder="Optional"
-                    placeholderTextColor={colors.textDisabled}
-                  />
-                </View>
-              </View>
-
-              <Text style={styles.label}>Notes</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                value={notes}
-                onChangeText={setNotes}
-                placeholder="Optional"
-                placeholderTextColor={colors.textDisabled}
-                multiline
-              />
-
-              {!isOnline && (
-                <Text style={styles.offlineNote}>
-                  You are offline — this will be saved locally and synced later.
-                </Text>
-              )}
-            </ScrollView>
-
-            <View style={styles.sheetActions}>
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={() => {
-                  setShowModal(false);
-                  resetForm();
-                }}
-              >
-                <Text style={styles.cancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.saveButton, saving && styles.disabled]}
-                onPress={handleSave}
-                disabled={saving}
-              >
-                {saving ? (
-                  <ActivityIndicator size="small" color={colors.background} />
-                ) : (
-                  <Text style={styles.saveText}>Save</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
     </View>
   );
 };
@@ -430,68 +251,17 @@ const styles = StyleSheet.create({
   emptyText: { color: colors.textMuted, fontSize: 16 },
   emptyHint: { color: colors.textDisabled, fontSize: 13 },
 
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  sheet: {
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: spacing.xl,
-    borderTopRightRadius: spacing.xl,
-    padding: spacing.xl,
-    maxHeight: '90%',
-  },
-  sheetTitle: { fontSize: 18, fontWeight: '700', color: colors.text },
-  label: {
-    color: colors.textMuted,
-    fontSize: 13,
-    marginTop: spacing.md,
-    marginBottom: spacing.xs,
-  },
-  hint: { color: colors.textDisabled, fontSize: 13, fontStyle: 'italic' },
-  warning: { color: colors.warning, fontSize: 12, marginTop: spacing.sm },
-  input: {
-    backgroundColor: colors.background,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.borderStrong,
-    color: colors.text,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    fontSize: 15,
-  },
-  textArea: { height: 70, textAlignVertical: 'top' },
-  fieldRow: { flexDirection: 'row', gap: spacing.md },
-  field: { flex: 1 },
-  chipRow: { flexDirection: 'row', gap: spacing.sm, paddingVertical: spacing.xs },
-  chip: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.borderStrong,
-  },
-  chipActive: { backgroundColor: colors.header, borderColor: colors.primary },
-  chipText: { color: colors.textMuted, fontSize: 13 },
-  chipTextActive: { color: colors.primary, fontWeight: '700' },
-  offlineNote: { color: colors.warning, fontSize: 12, marginTop: spacing.md },
-
-  sheetActions: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.lg },
-  cancelButton: {
-    flex: 1,
+  dayButton: {
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: spacing.lg,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.borderStrong,
-  },
-  cancelText: { color: colors.textMuted, fontSize: 15 },
-  saveButton: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: spacing.lg,
-    borderRadius: radius.md,
+    justifyContent: 'center',
+    gap: spacing.sm,
     backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    marginBottom: spacing.md,
   },
-  saveText: { color: colors.background, fontSize: 15, fontWeight: '700' },
-  disabled: { opacity: 0.6 },
+  dayButtonText: { color: colors.background, fontSize: 15, fontWeight: '700' },
 });
 
 export default MilkProductionScreen;

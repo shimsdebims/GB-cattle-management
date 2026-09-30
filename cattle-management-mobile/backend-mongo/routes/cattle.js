@@ -20,6 +20,7 @@ const {
   validationMiddleware,
   validateIdParam,
 } = require('../middleware');
+const { cleanClientId, createOnce } = require('../utils/idempotency');
 
 // GET /api/cattle — paginated list
 router.get(
@@ -208,8 +209,12 @@ router.post(
   validationMiddleware('cattle'),
   asyncHandler(async (req, res) => {
     // Duplicate tag_number surfaces as a 409 via the central error handler.
-    const cattle = await Cattle.create(req.body);
-    return created(res, cattle.toJSON(), 'Cattle created');
+    const clientId = cleanClientId(req.body.client_id);
+    const { record, replayed } = await createOnce(Cattle, clientId, () =>
+      Cattle.create({ ...req.body, client_id: clientId })
+    );
+    if (replayed) return ok(res, record.toJSON(), 'Cattle already saved');
+    return created(res, record.toJSON(), 'Cattle created');
   })
 );
 

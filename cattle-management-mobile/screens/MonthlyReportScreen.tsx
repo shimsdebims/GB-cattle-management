@@ -144,8 +144,8 @@ const MonthlyReportScreen = () => {
 
                   {cow.daily.map((value, dayIndex) => (
                     <View key={dayIndex} style={[styles.cell, styles.dayCell]}>
-                      <Text style={[styles.cellText, value === 0 && styles.cellZero]}>
-                        {value > 0 ? value.toFixed(1) : '—'}
+                      <Text style={[styles.cellText, value == null && styles.cellZero]}>
+                        {value == null ? '—' : value.toFixed(1)}
                       </Text>
                     </View>
                   ))}
@@ -167,7 +167,7 @@ const MonthlyReportScreen = () => {
                 {grid.daily_totals.map((value, index) => (
                   <View key={index} style={[styles.cell, styles.dayCell]}>
                     <Text style={styles.totalsText}>
-                      {value > 0 ? value.toFixed(1) : '—'}
+                      {value == null ? '—' : value.toFixed(1)}
                     </Text>
                   </View>
                 ))}

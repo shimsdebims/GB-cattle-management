@@ -13,6 +13,7 @@ import CattleListScreen from '../screens/CattleListScreen';
 import CattleDetailScreen from '../screens/CattleDetailScreen';
 import AddCattleScreen from '../screens/AddCattleScreen';
 import MilkProductionScreen from '../screens/MilkProductionScreen';
+import MilkDayScreen from '../screens/MilkDayScreen';
 import FeedingScreen from '../screens/FeedingScreen';
 import FinancialScreen from '../screens/FinancialScreen';
 import AnalyticsScreen from '../screens/AnalyticsScreen';
@@ -40,6 +41,8 @@ export type RootStackParamList = {
   CattleDetail: { cattleId: string };
   AddCattle: undefined;
   Settings: undefined;
+  /** The whole herd's milk for one day; defaults to the farm's today. */
+  MilkDay: { date?: string } | undefined;
 };
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -147,6 +150,11 @@ const AppNavigator = () => {
           name="AddCattle"
           component={AddCattleScreen}
           options={{ title: 'Add New Cattle' }}
+        />
+        <Stack.Screen
+          name="MilkDay"
+          component={MilkDayScreen}
+          options={{ title: 'Daily milk' }}
         />
         <Stack.Screen
           name="Settings"

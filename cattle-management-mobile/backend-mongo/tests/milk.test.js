@@ -149,7 +149,7 @@ describe('GET /api/milk/monthly-grid', () => {
     expect(bessie.total).toBe(22);
     expect(bessie.daily[0]).toBe(10); // day 1
     expect(bessie.daily[1]).toBe(12); // day 2
-    expect(bessie.daily[2]).toBe(0); // day 3, no record
+    expect(bessie.daily[2]).toBeNull(); // day 3, no record
     expect(bessie.average).toBe(11); // 22 L over 2 recorded days
 
     expect(daisy.total).toBe(8);

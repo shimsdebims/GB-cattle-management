@@ -24,7 +24,7 @@ import { colors, radius, spacing } from '../constants/theme';
 import type { FarmSettings, MilkPriceEntry } from '../types';
 
 const SettingsScreen = () => {
-  const { pendingCount, failedCount, lastSyncAt, isOnline } = useOfflineAPI();
+  const { pendingCount, failedCount, conflictCount, lastSyncAt, isOnline } = useOfflineAPI();
 
   const [settings, setSettings] = useState<FarmSettings | null>(null);
   const [priceInput, setPriceInput] = useState('');
@@ -250,6 +250,8 @@ const SettingsScreen = () => {
           <Row label="Connection" value={isOnline ? 'Online' : 'Offline'} />
           <Row label="Pending changes" value={String(pendingCount)} />
           <Row label="Failed changes" value={String(failedCount)} />
+          {/* Resolved on the Milk tab, where the choices are shown. */}
+          <Row label="Milk entries to review" value={String(conflictCount)} />
           <Row
             label="Last sync"
             value={lastSyncAt ? new Date(lastSyncAt).toLocaleString() : 'Never'}

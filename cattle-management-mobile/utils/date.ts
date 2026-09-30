@@ -17,8 +17,25 @@ export function toDateOnly(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-/** Today as "YYYY-MM-DD". */
-export const todayDateOnly = (): string => toDateOnly(new Date());
+/**
+ * The farm is in Bujumbura: UTC+2 all year (Burundi has no daylight saving).
+ * Must match FARM_UTC_OFFSET_HOURS in the API's utils/dates.js.
+ */
+const FARM_UTC_OFFSET_HOURS = 2;
+
+/**
+ * The farm's today as "YYYY-MM-DD", whatever the phone's own time zone, so a
+ * phone set to another zone (or a laptop abroad) records the farm's day.
+ */
+export const todayDateOnly = (): string =>
+  new Date(Date.now() + FARM_UTC_OFFSET_HOURS * 3600 * 1000).toISOString().slice(0, 10);
+
+/** Shifts a "YYYY-MM-DD" date by whole days. */
+export function shiftDay(date: string, delta: number): string {
+  const d = fromDateOnly(date);
+  d.setDate(d.getDate() + delta);
+  return toDateOnly(d);
+}
 
 /**
  * Parses "YYYY-MM-DD" (or an ISO timestamp) into a Date positioned at local

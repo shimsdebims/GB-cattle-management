@@ -15,6 +15,7 @@ const {
   validationMiddleware,
   validateIdParam,
 } = require('../middleware');
+const { cleanClientId, createOnce } = require('../utils/idempotency');
 
 /**
  * An expense amount can be given directly or derived from quantity × unit cost.
@@ -81,11 +82,12 @@ router.post(
   '/expenses',
   validationMiddleware('expense'),
   asyncHandler(async (req, res) => {
-    const expense = await Expense.create({
-      ...req.body,
-      amount: resolveAmount(req.body),
-    });
-    return created(res, expense.toJSON(), 'Expense created');
+    const clientId = cleanClientId(req.body.client_id);
+    const { record, replayed } = await createOnce(Expense, clientId, () =>
+      Expense.create({ ...req.body, amount: resolveAmount(req.body), client_id: clientId })
+    );
+    if (replayed) return ok(res, record.toJSON(), 'Expense already saved');
+    return created(res, record.toJSON(), 'Expense created');
   })
 );
 
@@ -158,8 +160,12 @@ router.post(
   '/revenue',
   validationMiddleware('revenue'),
   asyncHandler(async (req, res) => {
-    const revenue = await Revenue.create(req.body);
-    return created(res, revenue.toJSON(), 'Revenue created');
+    const clientId = cleanClientId(req.body.client_id);
+    const { record, replayed } = await createOnce(Revenue, clientId, () =>
+      Revenue.create({ ...req.body, client_id: clientId })
+    );
+    if (replayed) return ok(res, record.toJSON(), 'Revenue already saved');
+    return created(res, record.toJSON(), 'Revenue created');
   })
 );
 

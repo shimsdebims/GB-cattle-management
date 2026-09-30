@@ -18,6 +18,27 @@ const {
 } = require('../middleware');
 const { isValidMonth, utcMonthRange, daysAgo, round1 } = require('../utils/dates');
 const { priceOn } = require('../utils/pricing');
+const { cleanClientId, createOnce } = require('../utils/idempotency');
+const { ApiError } = require('../middleware');
+
+const POPULATE = ['cattle_id', 'tag_number name breed'];
+
+/**
+ * The day's total is the morning + evening sum whenever either is recorded;
+ * otherwise the total as given. Rounded to 0.01 so 8.1 + 6.2 stores 14.3.
+ */
+function resolveQuantity({ morning_liters, evening_liters, quantity_liters }) {
+  if (morning_liters == null && evening_liters == null) return quantity_liters;
+  return Math.round(((Number(morning_liters) || 0) + (Number(evening_liters) || 0)) * 100) / 100;
+}
+
+/** 409 carrying the server's record, so the app can offer to keep, replace or add. */
+function milkConflict(code, message, existing) {
+  const error = new ApiError(409, 'Conflict', message);
+  error.code = code;
+  error.data = existing;
+  return error;
+}
 
 // ─── Collection routes ───────────────────────────────────────────────────────
 
@@ -114,15 +135,16 @@ router.get(
       { $sort: { total: -1 } },
     ]);
 
-    const daily_totals = Array(daysInMonth).fill(0);
+    // null = no record that day, so a real 0 L day stays visible as 0.
+    const daily_totals = Array(daysInMonth).fill(null);
 
     const cows = rows.map((row) => {
-      const daily = Array(daysInMonth).fill(0);
+      const daily = Array(daysInMonth).fill(null);
 
       for (const { day, liters } of row.days) {
         if (day >= 1 && day <= daysInMonth) {
           daily[day - 1] = round1(liters);
-          daily_totals[day - 1] += liters;
+          daily_totals[day - 1] = (daily_totals[day - 1] || 0) + liters;
         }
       }
 
@@ -144,7 +166,7 @@ router.get(
       month,
       days_in_month: daysInMonth,
       cows,
-      daily_totals: daily_totals.map(round1),
+      daily_totals: daily_totals.map((v) => (v === null ? null : round1(v))),
       grand_total,
     });
   })
@@ -224,24 +246,47 @@ router.post(
   '/',
   validationMiddleware('milkProduction'),
   asyncHandler(async (req, res) => {
-    const { cattle_id, date_recorded, quantity_liters, quality_score, notes } = req.body;
+    const { cattle_id, date_recorded, morning_liters, evening_liters, quality_score, notes } =
+      req.body;
+    const clientId = cleanClientId(req.body.client_id);
 
     const cattleExists = await Cattle.exists({ _id: cattle_id });
     if (!cattleExists) throw notFound('Cattle');
 
-    // A duplicate (cattle_id, date_recorded) is rejected by the unique index and
-    // rendered as a 409 by the central error handler.
-    const record = await MilkProduction.create({
-      cattle_id,
-      date_recorded,
-      quantity_liters,
-      quality_score,
-      notes,
-      // Valued at the price in force that day, and kept even if the price changes.
-      price_per_liter: await priceOn(date_recorded),
+    const { record, replayed } = await createOnce(MilkProduction, clientId, async () => {
+      // One record per cow per day. Answer a clash with the existing record so
+      // the app can ask whether to keep it, replace it or add the two together.
+      const existing = await MilkProduction.findOne({
+        cattle_id,
+        date_recorded: MilkProduction.startOfUtcDay(date_recorded),
+      })
+        .populate(...POPULATE)
+        .lean();
+      if (existing) {
+        throw milkConflict(
+          'MILK_DAY_EXISTS',
+          'A record already exists for this animal on this date',
+          existing
+        );
+      }
+
+      return MilkProduction.create({
+        cattle_id,
+        date_recorded,
+        morning_liters,
+        evening_liters,
+        quantity_liters: resolveQuantity(req.body),
+        quality_score,
+        notes,
+        client_id: clientId,
+        // Valued at the price in force that day, and kept even if the price changes.
+        price_per_liter: await priceOn(date_recorded),
+      });
     });
 
-    await record.populate('cattle_id', 'tag_number name breed');
+    await record.populate(...POPULATE);
+    // A replayed retry is not a new record: 200, same body as the first time.
+    if (replayed) return ok(res, record.toJSON(), 'Milk record already saved');
     return created(res, record.toJSON(), 'Milk record created');
   })
 );
@@ -253,13 +298,33 @@ router.put(
   validationMiddleware('milkProduction', { partial: true }),
   asyncHandler(async (req, res) => {
     // The price is server-controlled; a moved date takes that day's price.
-    const { price_per_liter, ...update } = req.body; // eslint-disable-line no-unused-vars
+    // eslint-disable-next-line no-unused-vars
+    const { price_per_liter, expected_updated_at, ...update } = req.body;
+
+    const existing = await MilkProduction.findById(req.params.id).populate(...POPULATE).lean();
+    if (!existing) throw notFound('Milk production record');
+
+    // Edited somewhere else since this phone loaded it: ask, don't overwrite.
+    if (
+      expected_updated_at &&
+      new Date(expected_updated_at).getTime() !== new Date(existing.updated_at).getTime()
+    ) {
+      throw milkConflict(
+        'MILK_CHANGED',
+        'This record was changed on another device since you opened it',
+        existing
+      );
+    }
+
     if (update.date_recorded) update.price_per_liter = await priceOn(update.date_recorded);
+    if (['morning_liters', 'evening_liters', 'quantity_liters'].some((k) => k in update)) {
+      update.quantity_liters = resolveQuantity({ ...existing, ...update });
+    }
 
     const record = await MilkProduction.findByIdAndUpdate(req.params.id, update, {
       new: true,
       runValidators: true,
-    }).populate('cattle_id', 'tag_number name breed');
+    }).populate(...POPULATE);
 
     if (!record) throw notFound('Milk production record');
     return ok(res, record.toJSON(), 'Milk record updated');

@@ -43,6 +43,13 @@ const expenseSchema = new mongoose.Schema({
     type: String,
     trim: true,
     maxlength: LIMITS.NOTES_MAX,
+  },
+  // Unique id the app puts on a new record, so a save retried after a timeout
+  // returns the first copy instead of creating a second one.
+  client_id: {
+    type: String,
+    trim: true,
+    maxlength: LIMITS.CLIENT_ID_MAX,
   }
 }, {
   timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' }
@@ -52,5 +59,6 @@ const expenseSchema = new mongoose.Schema({
 expenseSchema.index({ date_recorded: -1 });
 expenseSchema.index({ category: 1, date_recorded: -1 });
 expenseSchema.index({ supplier: 1 });
+expenseSchema.index({ client_id: 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.model('Expense', expenseSchema);
