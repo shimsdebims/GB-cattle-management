@@ -1,0 +1,55 @@
+name: Reset farm data
+
+# Manual only. Clears every cow, milk, feeding, expense and revenue record and
+# the milk-price history; keeps user accounts and settings. Takes an encrypted
+# backup first, so the reset can be undone with scripts/restore.js.
+#
+# Leave "confirm" empty (or anything else) for a dry run that only counts.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type DELETE ALL FARM DATA to delete. Anything else = dry run (counts only).'
+        required: false
+        default: ''
+
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cattle-management-mobile/backend-mongo
+    steps:
+      - name: Check secrets are configured
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          if [ -z "$MONGODB_URI" ] || [ -z "$BACKUP_PASSPHRASE" ]; then
+            echo "::error::Set the MONGODB_URI and BACKUP_PASSPHRASE repository secrets."
+            exit 1
+          fi
+        working-directory: .
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: cattle-management-mobile/backend-mongo/package-lock.json
+      - run: npm ci --omit=dev
+      - name: Back up everything first
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: node scripts/backup.js ../../backups
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gb-backup-before-reset-${{ github.run_id }}
+          path: backups/*.json.enc
+          retention-days: 90
+          if-no-files-found: error
+      - name: Reset (dry run unless confirmed)
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          RESET_CONFIRM: ${{ inputs.confirm }}
+        run: node scripts/reset-farm-data.js --apply
