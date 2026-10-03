@@ -119,6 +119,19 @@ RESTORE_URI=<scratch db> BACKUP_PASSPHRASE=… npm run restore -- gb-backup-….
 `restore` never reads `MONGODB_URI` and refuses a non-empty target unless
 `--replace` is given.
 
+### Clearing test data before go-live
+
+Actions → **Reset farm data** → Run workflow. It backs everything up first
+(encrypted, kept 90 days as a workflow artifact), then:
+
+- with the box empty: a dry run that only prints how many records it would delete;
+- with `DELETE ALL FARM DATA` typed in the box: deletes every cow, milk, feeding,
+  expense and revenue record and the milk-price history.
+
+User accounts and settings are kept. Afterwards set the current milk price in
+the app (Settings), and on any phone used for testing check Settings → Pending
+changes is 0 so no queued test entry is sent back up.
+
 ### CI
 
 `.github/workflows/ci.yml` runs the API tests, the app typecheck and the web
