@@ -15,10 +15,10 @@ services:
         value: 10000           # Render sets PORT automatically; this is a fallback
       - key: MONGODB_URI
         sync: false           # Set manually in Render dashboard – never commit the real URI
-      # Login. Leave AUTH_REQUIRED=false until both apps ship the login screen,
-      # then set it to true. AUTH_SECRET: 32+ random characters, never reused.
+      # Login is on. Only an explicit "false" turns it off (never in production).
+      # AUTH_SECRET: 32+ random characters, never reused.
       - key: AUTH_REQUIRED
-        value: "false"
+        value: "true"
       - key: AUTH_SECRET
         generateValue: true
       # Creates the owner account on first boot if no user exists yet.

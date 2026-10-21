@@ -91,15 +91,23 @@ Seven tabs:
 
 ### Login
 
-Login ships **off** so installed apps keep working. To switch it on:
-
-1. In Render, set `AUTH_SECRET` (32+ random characters), `ADMIN_USERNAME` and
-   `ADMIN_PASSWORD`. The owner account is created on the next boot.
-2. Ship the app versions that have the login screen (Android update, web deploy).
-3. Set `AUTH_REQUIRED=true` in Render.
+Login is **required** unless `AUTH_REQUIRED` is set to exactly `false`, which is
+for local development only. A missing or mistyped value keeps login on. Render
+needs `AUTH_SECRET` (32+ random characters, or Render's "Generate"), and
+`ADMIN_USERNAME` / `ADMIN_PASSWORD` create the owner account on the first boot
+with no user. The boot log says which mode is live (`Login required` or
+`LOGIN IS OFF`).
 
 Reset a password (logs out every device):
 `npm run create-user -- <username> <new-password>` with `MONGODB_URI` set.
+
+### Is he using it?
+
+Every nightly backup ends with an activity summary, and Actions → **Usage
+report** → Run workflow prints it on demand: per record type, the total, how
+many were added in the last 7 days and the date of the newest, plus on how
+many of the last 7 days milk was filled in. Counts and dates only, because the
+logs of this public repository are public. Locally: `npm run usage`.
 
 ### Backups
 

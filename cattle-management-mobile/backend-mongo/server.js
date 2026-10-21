@@ -4,6 +4,7 @@ const { createApp } = require('./app');
 const db = require('./db');
 const { ensurePriceHistory } = require('./utils/pricing');
 const { bootstrapOwner } = require('./routes/auth');
+const { isAuthRequired } = require('./utils/auth');
 
 const PORT = process.env.PORT || 8080;
 
@@ -41,8 +42,14 @@ async function start() {
     }).catch((error) => console.error('Owner bootstrap failed:', error.message));
   }
 
-  if (process.env.AUTH_REQUIRED === 'true' && !process.env.AUTH_SECRET) {
-    console.error('⚠️  AUTH_REQUIRED=true but AUTH_SECRET is not set: every request will fail.');
+  // Say which mode is live, so the Render log answers "is login on?" at a glance.
+  if (isAuthRequired()) {
+    console.log('🔒  Login required (AUTH_REQUIRED is not "false")');
+    if (!process.env.AUTH_SECRET) {
+      console.error('⚠️  Login is required but AUTH_SECRET is not set: every request will fail.');
+    }
+  } else {
+    console.warn('⚠️  LOGIN IS OFF (AUTH_REQUIRED=false): anyone with the address can read and change the data.');
   }
 
   const app = createApp();

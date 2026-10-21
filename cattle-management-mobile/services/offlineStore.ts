@@ -158,17 +158,54 @@ export const readFailed = (): Promise<PendingOperation[]> =>
 export const writeFailed = (ops: PendingOperation[]): Promise<void> =>
   writeJson(FAILED_KEY, ops);
 
-export async function enqueue(
+/**
+ * The queue a sync should leave behind, given what was stored when it started
+ * (`snapshot`), what it still has to retry (`remaining`) and what is stored
+ * now (`current`).
+ *
+ * A sync awaits the network for every operation, and saves made meanwhile are
+ * appended to the stored queue. Writing `remaining` alone deleted them. So:
+ * keep the retries that are still stored (one deleted meanwhile stays
+ * deleted), then everything added since the snapshot, in order.
+ */
+export function mergeQueueAfterSync(
+  snapshot: PendingOperation[],
+  remaining: PendingOperation[],
+  current: PendingOperation[]
+): PendingOperation[] {
+  const snapshotIds = new Set(snapshot.map((op) => op.id));
+  const storedIds = new Set(current.map((op) => op.id));
+  return [
+    ...remaining.filter((op) => storedIds.has(op.id)),
+    ...current.filter((op) => !snapshotIds.has(op.id)),
+  ];
+}
+
+/**
+ * Every read-modify-write of the stored queue runs through here, one at a
+ * time. Two of them interleaving across an await (a save landing between a
+ * sync's read and its write) is how a queued change gets overwritten.
+ */
+let queueLock: Promise<unknown> = Promise.resolve();
+export function withQueueLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = queueLock.then(fn, fn);
+  queueLock = run.catch(() => undefined);
+  return run;
+}
+
+export function enqueue(
   operation: Omit<PendingOperation, 'id' | 'createdAt' | 'attempts'>
 ): Promise<void> {
-  const queue = await readQueue();
-  queue.push({
-    ...operation,
-    id: `op_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    createdAt: Date.now(),
-    attempts: 0,
+  return withQueueLock(async () => {
+    const queue = await readQueue();
+    queue.push({
+      ...operation,
+      id: `op_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      createdAt: Date.now(),
+      attempts: 0,
+    });
+    await writeQueue(queue);
   });
-  await writeQueue(queue);
 }
 
 // ─── Milk conflicts ──────────────────────────────────────────────────────────

@@ -16,6 +16,7 @@ const { EJSON } = mongoose.mongo.BSON;
 
 const db = require('../db');
 const { encrypt } = require('../utils/backupCrypto');
+const { usageSummary, printUsageSummary } = require('../utils/usageSummary');
 
 async function main() {
   const passphrase = process.env.BACKUP_PASSPHRASE;
@@ -54,6 +55,13 @@ async function main() {
 
   console.log(`Backup written: ${outFile} (${file.length} bytes)`);
   console.table(counts);
+
+  // Doubles as the daily "is he using it?" check; never fails the backup.
+  try {
+    printUsageSummary(await usageSummary());
+  } catch (error) {
+    console.warn(`Activity summary skipped: ${error.message}`);
+  }
 }
 
 main()

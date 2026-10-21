@@ -14,7 +14,8 @@
     "test:unit": "NODE_ENV=test jest --runInBand -c jest.unit.config.js",
     "backup": "node scripts/backup.js",
     "restore": "node scripts/restore.js",
-    "create-user": "node scripts/create-user.js"
+    "create-user": "node scripts/create-user.js",
+    "usage": "node scripts/usage-report.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

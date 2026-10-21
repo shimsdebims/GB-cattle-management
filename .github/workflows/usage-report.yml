@@ -1,0 +1,30 @@
+name: Usage report
+
+# Manual, read-only: how many cows, milk, feeding, expense and revenue records
+# exist, how many were added in the last 7 days, and when the newest was added.
+# Counts and dates only (this repository's logs are public). The same summary
+# is printed at the end of every nightly backup.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  usage:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cattle-management-mobile/backend-mongo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: cattle-management-mobile/backend-mongo/package-lock.json
+      - run: npm ci --omit=dev
+      - name: Activity summary
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+        run: node scripts/usage-report.js
