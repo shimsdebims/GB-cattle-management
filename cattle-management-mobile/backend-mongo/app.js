@@ -8,17 +8,18 @@ const morgan = require('morgan');
 const { errorHandler } = require('./middleware');
 const { authMiddleware } = require('./middleware/auth');
 const auth = require('./routes/auth');
+const { isAuthRequired } = require('./utils/auth');
 
 /**
  * Builds the Express app. Kept separate from `server.js` so tests can mount it
  * with supertest without opening a port or connecting to a database.
  *
- * `requireAuth` defaults to AUTH_REQUIRED=true. It stays off until both apps
- * ship a login screen, then is switched on in the Render dashboard.
+ * Login is required unless AUTH_REQUIRED is explicitly "false" (see
+ * isAuthRequired): forgetting the variable must not open the farm's data.
  */
 function createApp({
   enableLogging = true,
-  requireAuth = process.env.AUTH_REQUIRED === 'true',
+  requireAuth = isAuthRequired(),
 } = {}) {
   const app = express();
 

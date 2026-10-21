@@ -15,7 +15,9 @@ import {
   readConflicts,
   readFailed,
   readIdMap,
+  mergeQueueAfterSync,
   readQueue,
+  withQueueLock,
   recordIdMapping,
   refreshQueueCounters,
   resolveId,
@@ -262,10 +264,20 @@ export async function synchronize(): Promise<void> {
   }
 
   setSyncState({ isSyncing: true });
+  try {
+    await replayQueue(queue);
+  } finally {
+    // Always release the flag: a stuck "syncing" state blocked every later sync.
+    setSyncState({ isSyncing: false });
+    await refreshQueueCounters();
+  }
+}
 
+/** One pass over the queue snapshot; see synchronize(). */
+async function replayQueue(queue: PendingOperation[]): Promise<void> {
   const idMap = await readIdMap();
   const remaining: PendingOperation[] = [];
-  const failed = await readFailed();
+  const newlyFailed: PendingOperation[] = [];
   // Ops folded into a milk conflict (later edits of a clashing offline entry).
   const absorbed = new Set<string>();
   // Latest server version per record, learned during this run, so a second
@@ -339,7 +351,7 @@ export async function synchronize(): Promise<void> {
         error instanceof ApiError ? error.displayMessage : String(error);
 
       if (isPermanentFailure(error) || attempts >= MAX_ATTEMPTS) {
-        failed.push({ ...original, attempts, lastError });
+        newlyFailed.push({ ...original, attempts, lastError });
       } else {
         remaining.push({ ...original, attempts, lastError });
         // Network is down again — stop and keep the rest of the queue intact.
@@ -352,12 +364,13 @@ export async function synchronize(): Promise<void> {
     }
   }
 
-  await writeQueue(remaining);
-  await writeFailed(failed);
+  // Re-read before writing: saves made while this pass awaited the network
+  // were appended to the stored queue, and must survive it.
+  await withQueueLock(async () =>
+    writeQueue(mergeQueueAfterSync(queue, remaining, await readQueue()))
+  );
+  await writeFailed([...(await readFailed()), ...newlyFailed]);
   await writeLastSync(Date.now());
-
-  setSyncState({ isSyncing: false });
-  await refreshQueueCounters();
 }
 
 /** Clears operations the server permanently rejected. */
@@ -466,8 +479,10 @@ async function deleteRecord(
   // A record that only ever existed locally: drop its pending create instead of
   // asking the server to delete something it has never seen.
   if (isTempId(id)) {
-    const queue = await readQueue();
-    await writeQueue(queue.filter((op) => op.recordId !== id));
+    await withQueueLock(async () => {
+      const queue = await readQueue();
+      await writeQueue(queue.filter((op) => op.recordId !== id));
+    });
     await refreshQueueCounters();
     return;
   }

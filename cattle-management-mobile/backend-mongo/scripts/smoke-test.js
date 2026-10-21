@@ -66,7 +66,7 @@ async function main() {
     )
   );
 
-  const server = createApp({ enableLogging: false }).listen(PORT);
+  const server = createApp({ enableLogging: false, requireAuth: false }).listen(PORT);
   console.log(`\nSmoke test on ${BASE}\n`);
 
   try {

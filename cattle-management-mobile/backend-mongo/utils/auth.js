@@ -75,8 +75,19 @@ function readToken(token, { now = Date.now() } = {}) {
   }
 }
 
+/**
+ * Whether the API demands a login, from the AUTH_REQUIRED env value.
+ *
+ * Fails closed: only an explicit "false" turns login off. A missing or mistyped
+ * value used to leave the whole API open to anyone with its address.
+ */
+function isAuthRequired(value = process.env.AUTH_REQUIRED) {
+  return String(value ?? '').trim().toLowerCase() !== 'false';
+}
+
 module.exports = {
   TOKEN_TTL_DAYS,
+  isAuthRequired,
   hashPassword,
   verifyPassword,
   issueToken,

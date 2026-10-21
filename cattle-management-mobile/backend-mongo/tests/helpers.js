@@ -1,6 +1,7 @@
 const { createApp } = require('../app');
 
-const app = createApp({ enableLogging: false });
+// Data-route tests run without login; tests/auth.test.js covers the guard.
+const app = createApp({ enableLogging: false, requireAuth: false });
 
 /** Valid cattle payload; override any field per test. */
 const cattlePayload = (overrides = {}) => ({
