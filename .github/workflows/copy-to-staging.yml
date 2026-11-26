@@ -1,0 +1,64 @@
+name: Copy production to staging
+
+# Manual. Gives the staging server a fresh copy of the real farm data so a
+# change can be tried on a Vercel preview before it reaches him:
+#   1. backs up production (read-only), encrypted, kept 14 days;
+#   2. restores that backup into the STAGING database, replacing what is there.
+# Doubles as the restore drill: if this run is green, backups restore.
+# Production is never written to: restore.js only writes to RESTORE_URI and
+# refuses a database with the same name as the backup's source.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  copy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cattle-management-mobile/backend-mongo
+    steps:
+      - name: Check secrets are configured
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          STAGING_MONGODB_URI: ${{ secrets.STAGING_MONGODB_URI }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          if [ -z "$MONGODB_URI" ] || [ -z "$STAGING_MONGODB_URI" ] || [ -z "$BACKUP_PASSPHRASE" ]; then
+            echo "::error::Set the MONGODB_URI, STAGING_MONGODB_URI and BACKUP_PASSPHRASE repository secrets."
+            exit 1
+          fi
+          if [ "$MONGODB_URI" = "$STAGING_MONGODB_URI" ]; then
+            echo "::error::STAGING_MONGODB_URI is the production database. Use a different database name (e.g. /gb-staging)."
+            exit 1
+          fi
+        working-directory: .
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: cattle-management-mobile/backend-mongo/package-lock.json
+      - run: npm ci --omit=dev
+      - name: Back up production (read-only)
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: node scripts/backup.js ../../backups
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gb-backup-for-staging-${{ github.run_id }}
+          path: backups/*.json.enc
+          retention-days: 14
+          if-no-files-found: error
+      - name: Restore into staging
+        env:
+          RESTORE_URI: ${{ secrets.STAGING_MONGODB_URI }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: node scripts/restore.js "$(ls ../../backups/*.json.enc)" --apply --replace
+      - name: Staging activity (should match production)
+        env:
+          MONGODB_URI: ${{ secrets.STAGING_MONGODB_URI }}
+        run: node scripts/usage-report.js

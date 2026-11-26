@@ -7,6 +7,8 @@
  *
  * Safety:
  *   - Uses RESTORE_URI, never MONGODB_URI, so restoring is a deliberate act.
+ *   - Refuses a target database with the same name as the backup's source
+ *     (i.e. production) unless --allow-same-database is given.
  *   - Refuses a target that already holds data unless --replace is given, in
  *     which case each restored collection is emptied first.
  *   - Without --apply it only prints what it would do.
@@ -38,6 +40,16 @@ async function main() {
 
   await db.connect(process.env.RESTORE_URI, { required: true });
   const database = mongoose.connection.db;
+
+  // Never restore over the database the backup came from (production) by
+  // accident: a test copy must live under another database name.
+  if (database.databaseName === dump.database && !flags.includes('--allow-same-database')) {
+    throw new Error(
+      `Target database "${database.databaseName}" has the same name as the backup's source. ` +
+        'Restore into a database with a different name (e.g. gb-staging), or pass ' +
+        '--allow-same-database if you really mean to overwrite it.'
+    );
+  }
 
   const existing = {};
   for (const name of names) {
