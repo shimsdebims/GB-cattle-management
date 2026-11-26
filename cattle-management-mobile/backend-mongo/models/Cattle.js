@@ -84,6 +84,24 @@ const cattleSchema = new mongoose.Schema({
   deceased_date: {
     type: Date,
   },
+  // The farmer's own words for why a cow is Inactive ("trop jeune", "tarie").
+  inactive_reason: {
+    type: String,
+    trim: true,
+    maxlength: LIMITS.STATUS_REASON_MAX,
+  },
+  // Every status change, oldest first, so the cow card can say when and why.
+  status_history: {
+    type: [
+      {
+        _id: false,
+        status: { type: String, enum: CATTLE_STATUSES, required: true },
+        reason: { type: String, trim: true, maxlength: LIMITS.STATUS_REASON_MAX },
+        changed_at: { type: Date, required: true },
+      },
+    ],
+    default: undefined,
+  },
   notes: {
     type: String,
     trim: true,

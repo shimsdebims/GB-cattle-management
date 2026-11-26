@@ -44,6 +44,7 @@ export const radius = {
 /** Status → colour maps used by badges in more than one screen. */
 export const statusColor: Record<string, string> = {
   Active: colors.success,
+  Inactive: colors.textFaint,
   Sold: colors.info,
   Deceased: colors.danger,
   Quarantined: colors.warning,

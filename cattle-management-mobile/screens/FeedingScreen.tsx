@@ -63,8 +63,10 @@ const FeedingScreen = () => {
     }, [load])
   );
 
+  // Every animal still on the farm eats, inactive ones included; only sold and
+  // dead animals are left out.
   const activeHerd = useMemo(
-    () => herd.filter((cow) => cow.current_status === 'Active'),
+    () => herd.filter((cow) => cow.current_status !== 'Sold' && cow.current_status !== 'Deceased'),
     [herd]
   );
 

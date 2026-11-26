@@ -115,6 +115,14 @@ const DashboardScreen = () => {
           <Stat label="Active" value={cattle?.active_cattle ?? 0} icon="check-circle" color={colors.info} />
           <Stat label="Healthy" value={cattle?.healthy_cattle ?? 0} icon="favorite" color={colors.primary} />
           <Stat label="Pregnant" value={cattle?.pregnant_cattle ?? 0} icon="child-care" color={colors.warning} />
+          {(cattle?.inactive_cattle ?? 0) > 0 && (
+            <Stat
+              label="Inactive"
+              value={cattle?.inactive_cattle ?? 0}
+              icon="pause-circle-outline"
+              color={colors.textFaint}
+            />
+          )}
         </Section>
 
         <Section title="Milk Production">

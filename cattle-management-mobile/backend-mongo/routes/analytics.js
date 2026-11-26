@@ -8,6 +8,7 @@ const Feeding = require('../models/Feeding');
 const Expense = require('../models/Expense');
 const Revenue = require('../models/Revenue');
 const Settings = require('../models/Settings');
+const { ARCHIVED_STATUSES } = require('../constants/domain');
 const {
   ok,
   badRequest,
@@ -52,12 +53,17 @@ router.get(
       feedingStats,
     ] = await Promise.all([
       Cattle.aggregate([
+        // The working herd: sold and dead animals live in the archive.
+        { $match: { current_status: { $nin: ARCHIVED_STATUSES } } },
         {
           $group: {
             _id: null,
             total_cattle: { $sum: 1 },
             active_cattle: {
               $sum: { $cond: [{ $eq: ['$current_status', 'Active'] }, 1, 0] },
+            },
+            inactive_cattle: {
+              $sum: { $cond: [{ $eq: ['$current_status', 'Inactive'] }, 1, 0] },
             },
             healthy_cattle: {
               $sum: { $cond: [{ $eq: ['$health_status', 'Healthy'] }, 1, 0] },
@@ -114,6 +120,7 @@ router.get(
     const cattle = cattleStats[0] || {
       total_cattle: 0,
       active_cattle: 0,
+      inactive_cattle: 0,
       healthy_cattle: 0,
       pregnant_cattle: 0,
     };

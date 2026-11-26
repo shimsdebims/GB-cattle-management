@@ -24,7 +24,13 @@ const GENDERS = ['Male', 'Female'];
 
 const HEALTH_STATUSES = ['Healthy', 'Sick', 'Injured', 'Pregnant', 'Recovering'];
 
-const CATTLE_STATUSES = ['Active', 'Sold', 'Deceased', 'Quarantined'];
+// Inactive: in the herd but not milked (too young, dry, …), with the farmer's
+// own reason. Off the daily milk sheet, still fed and counted.
+const CATTLE_STATUSES = ['Active', 'Inactive', 'Sold', 'Deceased', 'Quarantined'];
+
+// Statuses an ordinary edit may switch between. Selling and its undo have
+// their own routes so the sale income is booked or removed with them.
+const SWITCHABLE_STATUSES = ['Active', 'Inactive', 'Quarantined'];
 
 // Statuses that move a cow to the archive: hidden by default, history kept.
 const ARCHIVED_STATUSES = ['Sold', 'Deceased'];
@@ -90,6 +96,7 @@ const LIMITS = {
   USERNAME_MIN: 3,
   USERNAME_MAX: 40,
   CLIENT_ID_MAX: 64,
+  STATUS_REASON_MAX: 200,
 };
 
 const DEFAULTS = {
@@ -102,6 +109,7 @@ module.exports = {
   GENDERS,
   HEALTH_STATUSES,
   CATTLE_STATUSES,
+  SWITCHABLE_STATUSES,
   ARCHIVED_STATUSES,
   FEED_TYPES,
   EXPENSE_CATEGORIES,

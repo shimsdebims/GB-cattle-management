@@ -6,7 +6,7 @@ const MilkProduction = require('../models/MilkProduction');
 const Feeding = require('../models/Feeding');
 const Revenue = require('../models/Revenue');
 const Settings = require('../models/Settings');
-const { LIMITS, ARCHIVED_STATUSES } = require('../constants/domain');
+const { LIMITS, ARCHIVED_STATUSES, SWITCHABLE_STATUSES } = require('../constants/domain');
 const { incomeExpr } = require('../utils/pricing');
 const {
   ok,
@@ -210,8 +210,16 @@ router.post(
   asyncHandler(async (req, res) => {
     // Duplicate tag_number surfaces as a 409 via the central error handler.
     const clientId = cleanClientId(req.body.client_id);
+    const status = req.body.current_status || 'Active';
+    const reason = status === 'Inactive' ? req.body.inactive_reason || undefined : undefined;
     const { record, replayed } = await createOnce(Cattle, clientId, () =>
-      Cattle.create({ ...req.body, client_id: clientId })
+      Cattle.create({
+        ...req.body,
+        current_status: status,
+        inactive_reason: reason,
+        status_history: [{ status, reason, changed_at: new Date() }],
+        client_id: clientId,
+      })
     );
     if (replayed) return ok(res, record.toJSON(), 'Cattle already saved');
     return created(res, record.toJSON(), 'Cattle created');
@@ -224,7 +232,53 @@ router.put(
   validateIdParam(),
   validationMiddleware('cattle', { partial: true }),
   asyncHandler(async (req, res) => {
-    const cattle = await Cattle.findByIdAndUpdate(req.params.id, req.body, {
+    const existing = await Cattle.findById(req.params.id).lean();
+    if (!existing) throw notFound('Cattle');
+
+    // History is server-kept; inactive_reason only means something with Inactive.
+    // eslint-disable-next-line no-unused-vars
+    const { status_history, inactive_reason, current_status, ...fields } = req.body;
+    const update = { $set: fields };
+
+    const target = current_status ?? existing.current_status;
+    if (current_status !== undefined && current_status !== existing.current_status) {
+      if (ARCHIVED_STATUSES.includes(existing.current_status)) {
+        throw statusConflict(
+          existing.current_status === 'Sold'
+            ? 'This animal is sold. Undo the sale to bring it back to the herd.'
+            : 'This animal is recorded as deceased and cannot change status.'
+        );
+      }
+      if (!SWITCHABLE_STATUSES.includes(current_status)) {
+        throw statusConflict(
+          current_status === 'Sold'
+            ? 'Use "Mark as sold" so the sale price is recorded.'
+            : `An animal cannot be set to ${current_status} here.`
+        );
+      }
+      update.$set.current_status = current_status;
+      update.$push = {
+        status_history: {
+          status: current_status,
+          reason: current_status === 'Inactive' ? inactive_reason || undefined : undefined,
+          changed_at: new Date(),
+        },
+      };
+    }
+
+    if (target === 'Inactive') {
+      // A new reason, or a cleared one (null/""), applies; omitted keeps the old.
+      if (inactive_reason !== undefined) {
+        if (inactive_reason) update.$set.inactive_reason = inactive_reason;
+        else update.$unset = { inactive_reason: 1 };
+      }
+    } else if (existing.inactive_reason !== undefined) {
+      update.$unset = { inactive_reason: 1 };
+    }
+
+    if (Object.keys(update.$set).length === 0) delete update.$set;
+
+    const cattle = await Cattle.findByIdAndUpdate(req.params.id, update, {
       new: true,
       runValidators: true,
     });
@@ -233,6 +287,12 @@ router.put(
     return ok(res, cattle.toJSON(), 'Cattle updated');
   })
 );
+
+function statusConflict(message) {
+  const error = new ApiError(409, 'Conflict', message);
+  error.code = 'STATUS_CHANGE_NOT_ALLOWED';
+  return error;
+}
 
 /**
  * POST /api/cattle/:id/sell — { sale_date, sale_price, buyer?, notes? }
