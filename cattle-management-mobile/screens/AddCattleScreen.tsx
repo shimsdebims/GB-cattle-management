@@ -51,6 +51,9 @@ const AddCattleScreen = () => {
   const [location, setLocation] = useState('');
   const [purchasePrice, setPurchasePrice] = useState('');
   const [notes, setNotes] = useState('');
+  // Inactive = in the herd but not milked yet (too young, dry, …), his own reason.
+  const [status, setStatus] = useState<'Active' | 'Inactive'>('Active');
+  const [inactiveReason, setInactiveReason] = useState('');
 
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -93,7 +96,8 @@ const AddCattleScreen = () => {
         health_status: healthStatus,
         location: location || undefined,
         purchase_price: priceValue,
-        current_status: 'Active',
+        current_status: status,
+        inactive_reason: status === 'Inactive' ? inactiveReason.trim() || undefined : undefined,
         notes: notes.trim() || undefined,
       });
 
@@ -182,6 +186,30 @@ const AddCattleScreen = () => {
             placeholderTextColor={colors.textDisabled}
             keyboardType="numeric"
           />
+        </Field>
+
+        <Field label="Status">
+          <Options
+            values={['Active', 'Inactive']}
+            selected={status}
+            onSelect={(value) => setStatus(value as 'Active' | 'Inactive')}
+          />
+          <Text style={styles.statusHint}>
+            {status === 'Active'
+              ? 'Active cows appear on the daily milk sheet.'
+              : 'Inactive cows stay in the herd but are left off the milk sheet. You can make her active later.'}
+          </Text>
+          {status === 'Inactive' && (
+            <TextInput
+              style={[styles.input, styles.reasonInput]}
+              value={inactiveReason}
+              onChangeText={setInactiveReason}
+              placeholder="Reason (optional), e.g. too young"
+              placeholderTextColor={colors.textDisabled}
+              maxLength={LIMITS.STATUS_REASON_MAX}
+              accessibilityLabel="Reason for inactive"
+            />
+          )}
         </Field>
 
         <Field label="Health status">
@@ -295,6 +323,8 @@ const Options = ({
 );
 
 const styles = StyleSheet.create({
+  statusHint: { color: colors.textFaint, fontSize: 12, marginTop: spacing.xs },
+  reasonInput: { marginTop: spacing.sm },
   container: { flex: 1, backgroundColor: colors.background },
   content: { padding: spacing.xl, paddingBottom: spacing.xxl * 2 },
   field: { marginBottom: spacing.lg },

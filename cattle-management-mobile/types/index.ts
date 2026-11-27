@@ -58,6 +58,10 @@ export interface Cattle extends Timestamped {
   sale_price?: number;
   buyer?: string;
   deceased_date?: string;
+  /** Why it is Inactive, in the farmer's words; only set while Inactive. */
+  inactive_reason?: string;
+  /** Every status change, oldest first (kept by the server). */
+  status_history?: { status: CattleStatus; reason?: string; changed_at: string }[];
   /** Virtual supplied by the API. */
   age_in_months?: number;
 }
@@ -138,6 +142,8 @@ export interface CattleFormData {
   purchase_date?: string;
   purchase_price?: number;
   current_status: CattleStatus;
+  /** Only with current_status Inactive; null/"" clears it. */
+  inactive_reason?: string | null;
   notes?: string;
   /** Set by the offline layer on create so a retry can't double the record. */
   client_id?: string;
@@ -198,8 +204,10 @@ export interface RevenueFormData {
 
 export interface DashboardSummary {
   cattle: {
+    /** The working herd: sold and dead animals excluded. */
     total_cattle: number;
     active_cattle: number;
+    inactive_cattle?: number;
     healthy_cattle: number;
     pregnant_cattle: number;
   };
@@ -289,6 +297,31 @@ export interface MonthlyGrid {
   cows: MonthlyGridCow[];
   daily_totals: (number | null)[];
   grand_total: number;
+}
+
+export interface FeedGridCow {
+  cattle_id: string;
+  name: string;
+  tag: string;
+  /** Length equals days_in_month; null = not fed (nothing recorded) that day. */
+  daily_kg: (number | null)[];
+  daily_cost: (number | null)[];
+  total_kg: number;
+  total_cost: number;
+  fed_days: number;
+  average_kg: number;
+}
+
+export interface FeedGrid {
+  month: string;
+  days_in_month: number;
+  cows: FeedGridCow[];
+  daily_totals_kg: (number | null)[];
+  daily_totals_cost: (number | null)[];
+  grand_total_kg: number;
+  grand_total_cost: number;
+  fed_days: number;
+  by_feed_type: { feed_type: string; total_kg: number; total_cost: number }[];
 }
 
 export interface MonthlyIncomeCow {

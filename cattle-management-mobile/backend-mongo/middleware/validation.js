@@ -149,6 +149,7 @@ const validateCattle = (data, { partial = false } = {}) => {
   // Optional on create (schemas supply defaults), validated whenever provided.
   checkEnum(errors, data, 'health_status', HEALTH_STATUSES, { ...opts });
   checkEnum(errors, data, 'current_status', CATTLE_STATUSES, { ...opts });
+  checkString(errors, data, 'inactive_reason', { max: LIMITS.STATUS_REASON_MAX, ...opts });
   checkNumber(errors, data, 'weight', { min: 0, max: LIMITS.CATTLE_WEIGHT_MAX, ...opts });
   checkNumber(errors, data, 'purchase_price', { min: 0, ...opts });
   checkDate(errors, data, 'purchase_date', { ...opts });

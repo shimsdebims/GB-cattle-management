@@ -18,6 +18,7 @@ import type {
   MilkFormData,
   MilkProduction,
   MonthlyGrid,
+  FeedGrid,
   MonthlyIncome,
   Paged,
   Pagination,
@@ -257,6 +258,9 @@ export const feedingAPI = {
 
   remove: (id: string) =>
     request<{ _id: string }>({ method: 'DELETE', url: `/feeding/${id}` }),
+
+  monthlyGrid: (month: string) =>
+    request<FeedGrid>({ method: 'GET', url: '/feeding/monthly-grid', params: { month } }),
 };
 
 export const financialAPI = {

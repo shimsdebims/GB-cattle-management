@@ -23,7 +23,7 @@ import { formatCurrency, formatLiters } from '../utils/formatCurrency';
 import { formatDate, todayDateOnly } from '../utils/date';
 import { useOfflineAPI } from '../hooks/useOfflineAPI';
 import { colors, healthColor, radius, spacing, statusColor } from '../constants/theme';
-import type { CattleSummary } from '../types';
+import { LIMITS, type CattleSummary } from '../types';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 
 type Nav = StackNavigationProp<RootStackParamList>;
@@ -39,6 +39,57 @@ const CattleDetailScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { isOnline } = useOfflineAPI();
+
+  // Active ↔ Inactive (his own reason). Goes through the offline layer, so it
+  // works without a connection and is sent later.
+  const [showInactive, setShowInactive] = useState(false);
+  const [inactiveReason, setInactiveReason] = useState('');
+  const [changingStatus, setChangingStatus] = useState(false);
+
+  const changeStatus = async (target: 'Active' | 'Inactive', reason?: string) => {
+    setChangingStatus(true);
+    try {
+      await offlineApi.updateCattle(cattleId, {
+        current_status: target,
+        ...(target === 'Inactive' ? { inactive_reason: reason?.trim() || null } : {}),
+      });
+      setShowInactive(false);
+      setInactiveReason('');
+      if (isOnline) {
+        await load();
+      } else {
+        // Show it now; the change is queued and sent when the connection is back.
+        setSummary((prev) =>
+          prev
+            ? {
+                ...prev,
+                cattle: {
+                  ...prev.cattle,
+                  current_status: target,
+                  inactive_reason: target === 'Inactive' ? reason?.trim() || undefined : undefined,
+                },
+              }
+            : prev
+        );
+        Alert.alert('Saved on this phone', 'It will be sent when the connection is back.');
+      }
+    } catch (err) {
+      Alert.alert('Could not change the status', err instanceof ApiError ? err.displayMessage : 'Please try again.');
+    } finally {
+      setChangingStatus(false);
+    }
+  };
+
+  const confirmActivate = () => {
+    Alert.alert(
+      `Make ${summary?.cattle.name ?? 'this cow'} active again?`,
+      'She will appear on the daily milk sheet from today.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Make active', onPress: () => void changeStatus('Active') },
+      ]
+    );
+  };
 
   // Sale form
   const [showSale, setShowSale] = useState(false);
@@ -158,6 +209,9 @@ const CattleDetailScreen = () => {
   const { cattle, summary: stats, lifetime, recent_milk_records, recent_feeding_records } = summary;
   const hasHistory = lifetime.milk_record_count > 0 || lifetime.feed_cost > 0 || lifetime.sale_income > 0;
   const isSold = cattle.current_status === 'Sold';
+  const isArchived = isSold || cattle.current_status === 'Deceased';
+  const isInactive = cattle.current_status === 'Inactive';
+  const history = [...(cattle.status_history ?? [])].reverse();
 
   const age = cattle.age_in_months;
   const ageLabel =
@@ -192,6 +246,15 @@ const CattleDetailScreen = () => {
           <Badge label={cattle.health_status} color={healthColor[cattle.health_status]} />
         </View>
       </View>
+
+      {isInactive && (
+        <View style={styles.inactiveNote}>
+          <MaterialIcons name="pause-circle-outline" size={18} color={colors.textMuted} />
+          <Text style={styles.inactiveText}>
+            Inactive{cattle.inactive_reason ? ` · ${cattle.inactive_reason}` : ''} — not on the milk sheet
+          </Text>
+        </View>
+      )}
 
       {/* Profile */}
       <Card title="Profile">
@@ -304,6 +367,37 @@ const CattleDetailScreen = () => {
         </Card>
       )}
 
+      {history.length > 1 && (
+        <Card title="Status history">
+          {history.map((entry, index) => (
+            <Row
+              key={`${entry.changed_at}-${index}`}
+              label={formatDate(entry.changed_at)}
+              value={entry.reason ? `${entry.status} · ${entry.reason}` : entry.status}
+            />
+          ))}
+        </Card>
+      )}
+
+      {/* Active ↔ Inactive works offline; it is queued like any other edit. */}
+      {!isArchived && (
+        <TouchableOpacity
+          style={[styles.statusButton, changingStatus && styles.disabledButton]}
+          onPress={isInactive ? confirmActivate : () => setShowInactive(true)}
+          disabled={changingStatus}
+          accessibilityRole="button"
+        >
+          <MaterialIcons
+            name={isInactive ? 'play-circle-outline' : 'pause-circle-outline'}
+            size={20}
+            color={colors.text}
+          />
+          <Text style={styles.statusButtonText}>
+            {isInactive ? 'Make active again' : 'Make inactive'}
+          </Text>
+        </TouchableOpacity>
+      )}
+
       {/* Sale and archive need the server, so they are online-only. */}
       {!isSold && (
         <TouchableOpacity
@@ -337,6 +431,52 @@ const CattleDetailScreen = () => {
           <Text style={styles.deleteText}>Delete (entered by mistake)</Text>
         </TouchableOpacity>
       )}
+
+      <Modal
+        visible={showInactive}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowInactive(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.overlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <View style={styles.sheet}>
+            <Text style={styles.sheetTitle}>Make {cattle.name} inactive</Text>
+            <Text style={styles.sheetHint}>
+              She stays in the herd with all her records, but is left off the daily milk sheet.
+              You can make her active again at any time.
+            </Text>
+            <Text style={styles.inputLabel}>Reason (optional)</Text>
+            <TextInput
+              style={styles.input}
+              value={inactiveReason}
+              onChangeText={setInactiveReason}
+              placeholder="e.g. too young, dry"
+              placeholderTextColor={colors.textDisabled}
+              maxLength={LIMITS.STATUS_REASON_MAX}
+              accessibilityLabel="Reason for inactive"
+            />
+            <View style={styles.sheetActions}>
+              <TouchableOpacity style={styles.cancelButton} onPress={() => setShowInactive(false)}>
+                <Text style={styles.cancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.confirmButton, changingStatus && styles.disabledButton]}
+                onPress={() => changeStatus('Inactive', inactiveReason)}
+                disabled={changingStatus}
+              >
+                {changingStatus ? (
+                  <ActivityIndicator color={colors.background} />
+                ) : (
+                  <Text style={styles.confirmText}>Make inactive</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
 
       <Modal visible={showSale} animationType="slide" transparent onRequestClose={() => setShowSale(false)}>
         <KeyboardAvoidingView
@@ -427,6 +567,28 @@ const Badge = ({ label, color }: { label: string; color?: string }) => (
 );
 
 const styles = StyleSheet.create({
+  inactiveNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  inactiveText: { color: colors.textMuted, fontSize: 14, flex: 1 },
+  statusButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    marginBottom: spacing.md,
+  },
+  statusButtonText: { color: colors.text, fontSize: 15, fontWeight: '600' },
   sellButton: {
     flexDirection: 'row',
     alignItems: 'center',

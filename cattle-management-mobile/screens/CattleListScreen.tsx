@@ -198,6 +198,11 @@ const CattleListScreen = () => {
               <View style={styles.cardIdentity}>
                 <Text style={styles.name}>{item.name}</Text>
                 <Text style={styles.tag}>{item.tag_number}</Text>
+                {item.current_status === 'Inactive' && item.inactive_reason ? (
+                  <Text style={styles.tag} numberOfLines={1}>
+                    {item.inactive_reason}
+                  </Text>
+                ) : null}
               </View>
               <View
                 style={[

@@ -32,8 +32,10 @@ export const HEALTH_STATUSES = [
   'Recovering',
 ] as const;
 
+/** Inactive: in the herd but not milked (too young, dry, …), reason in his words. */
 export const CATTLE_STATUSES = [
   'Active',
+  'Inactive',
   'Sold',
   'Deceased',
   'Quarantined',
@@ -91,6 +93,7 @@ export const LIMITS = {
   MILK_QUANTITY_MAX: 100,
   QUALITY_SCORE_MIN: 1,
   QUALITY_SCORE_MAX: 10,
+  STATUS_REASON_MAX: 200,
 } as const;
 
 export const DEFAULTS = {
