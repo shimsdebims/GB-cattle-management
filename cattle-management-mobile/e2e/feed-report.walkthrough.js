@@ -19,7 +19,7 @@ const SHOTS = process.env.SHOTS; // optional folder for screenshots
       total_cost: cost_per_unit != null ? quantity_kg * cost_per_unit : undefined,
     });
   feed(amani, '01', 'Hay', 10, 500);
-  feed(amani, '01', 'Silage', 5, 200); // same day adds up: 15 kg, 6,000 FBu
+  feed(amani, '01', 'Corn Silage', 5, 200); // same day adds up: 15 kg, 6,000 FBu
   feed(amani, '02', 'Hay', 8); // no price
   feed(bella, '01', 'Hay', 4, 500);
 
@@ -56,7 +56,7 @@ const SHOTS = process.env.SHOTS; // optional folder for screenshots
   check('All cows, whole month = 33 kg', t.includes('33.0'));
   check('By-cow month summary: Amani 23 kg / 6,000 FBu', await page.getByText('By cow', { exact: false }).last().isVisible() && t.includes('23.0 kg') && t.includes('6,000 FBu'));
   check('By-cow month summary: Bella 10 kg / 2,600 FBu', t.includes('10.0 kg') && t.includes('2,600 FBu'));
-  check('Feed-type breakdown shown', t.includes('By feed type') && t.includes('Silage'));
+  check('Feed-type breakdown shown', t.includes('By feed type') && t.includes('Corn Silage'));
   const wide = await overflow(page);
   // The day table scrolls sideways on purpose; only the page itself must fit.
   check('Page itself fits the phone width', !(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)), wide.slice(0, 2).join(' | '));

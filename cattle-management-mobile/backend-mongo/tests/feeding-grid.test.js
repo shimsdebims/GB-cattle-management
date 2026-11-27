@@ -15,7 +15,7 @@ describe('feed per cow / per day / per month', () => {
 
     // Amani: 1 Jul hay 10 kg × 500, 1 Jul silage 5 kg × 200 (same day adds up), 3 Jul 8 kg, no price
     await feed(a._id, { date_recorded: '2026-07-01', quantity_kg: 10, cost_per_unit: 500 });
-    await feed(a._id, { date_recorded: '2026-07-01', feed_type: 'Silage', quantity_kg: 5, cost_per_unit: 200 });
+    await feed(a._id, { date_recorded: '2026-07-01', feed_type: 'Corn Silage', quantity_kg: 5, cost_per_unit: 200 });
     await feed(a._id, { date_recorded: '2026-07-03', quantity_kg: 8, cost_per_unit: undefined });
     // Bella: 1 Jul 4 kg × 500
     await feed(b._id, { date_recorded: '2026-07-01', quantity_kg: 4, cost_per_unit: 500 });
@@ -54,7 +54,7 @@ describe('feed per cow / per day / per month', () => {
 
     expect(g.by_feed_type).toEqual([
       { feed_type: 'Hay', total_kg: 22, total_cost: 7000 },
-      { feed_type: 'Silage', total_kg: 5, total_cost: 1000 },
+      { feed_type: 'Corn Silage', total_kg: 5, total_cost: 1000 },
     ]);
   });
 
