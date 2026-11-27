@@ -175,6 +175,49 @@ function createFakeApi({ today }) {
       return ok({ month: q.get('month'), days_in_month: 30, cows: [], daily_totals: Array(30).fill(null), grand_total: 0 });
     }
 
+    if (path === '/feeding/monthly-grid') {
+      // Mirrors routes/feeding.js monthly-grid.
+      const month = q.get('month');
+      const [y, mo] = month.split('-').map(Number);
+      const dim = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+      const r1 = (n) => Math.round(n * 10) / 10;
+      const recs = db.feeding.filter((f) => day(f.date_recorded).startsWith(month));
+      const byCow = new Map();
+      const dKg = Array(dim).fill(null), dCost = Array(dim).fill(null), types = new Map();
+      for (const f of recs) {
+        const i = Number(day(f.date_recorded).slice(8, 10)) - 1;
+        const cost = f.cost_per_unit != null ? f.quantity_kg * f.cost_per_unit : 0;
+        if (!byCow.has(f.cattle_id)) byCow.set(f.cattle_id, { kg: Array(dim).fill(null), cost: Array(dim).fill(null) });
+        const c = byCow.get(f.cattle_id);
+        c.kg[i] = (c.kg[i] || 0) + f.quantity_kg;
+        c.cost[i] = (c.cost[i] || 0) + cost;
+        dKg[i] = (dKg[i] || 0) + f.quantity_kg;
+        dCost[i] = (dCost[i] || 0) + cost;
+        const t = types.get(f.feed_type) || { feed_type: f.feed_type, total_kg: 0, total_cost: 0 };
+        t.total_kg += f.quantity_kg; t.total_cost += cost; types.set(f.feed_type, t);
+      }
+      const sum = (a) => a.reduce((x, v) => x + (v || 0), 0);
+      const cows = [...byCow.entries()].map(([cid, c]) => {
+        const cow = db.cattle.find((x) => x._id === cid) || {};
+        const fed = c.kg.filter((v) => v !== null).length;
+        return {
+          cattle_id: cid, name: cow.name || 'Unknown', tag: cow.tag_number || '—',
+          daily_kg: c.kg.map((v) => (v === null ? null : r1(v))),
+          daily_cost: c.cost.map((v) => (v === null ? null : Math.round(v))),
+          total_kg: r1(sum(c.kg)), total_cost: Math.round(sum(c.cost)), fed_days: fed,
+          average_kg: fed ? r1(sum(c.kg) / fed) : 0,
+        };
+      }).sort((a, b) => b.total_kg - a.total_kg);
+      return ok({
+        month, days_in_month: dim, cows,
+        daily_totals_kg: dKg.map((v) => (v === null ? null : r1(v))),
+        daily_totals_cost: dCost.map((v) => (v === null ? null : Math.round(v))),
+        grand_total_kg: r1(sum(dKg)), grand_total_cost: Math.round(sum(dCost)),
+        fed_days: dKg.filter((v) => v !== null).length,
+        by_feed_type: [...types.values()].sort((a, b) => b.total_kg - a.total_kg)
+          .map((t) => ({ ...t, total_kg: r1(t.total_kg), total_cost: Math.round(t.total_cost) })),
+      });
+    }
     // ── feeding / finance ──
     const lists = { '/feeding': 'feeding', '/financial/expenses': 'expenses', '/financial/revenue': 'revenue' };
     if (lists[path] && method === 'GET') return ok(db[lists[path]], 200, { pagination: page(db[lists[path]]) });

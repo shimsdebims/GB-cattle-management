@@ -299,6 +299,31 @@ export interface MonthlyGrid {
   grand_total: number;
 }
 
+export interface FeedGridCow {
+  cattle_id: string;
+  name: string;
+  tag: string;
+  /** Length equals days_in_month; null = not fed (nothing recorded) that day. */
+  daily_kg: (number | null)[];
+  daily_cost: (number | null)[];
+  total_kg: number;
+  total_cost: number;
+  fed_days: number;
+  average_kg: number;
+}
+
+export interface FeedGrid {
+  month: string;
+  days_in_month: number;
+  cows: FeedGridCow[];
+  daily_totals_kg: (number | null)[];
+  daily_totals_cost: (number | null)[];
+  grand_total_kg: number;
+  grand_total_cost: number;
+  fed_days: number;
+  by_feed_type: { feed_type: string; total_kg: number; total_cost: number }[];
+}
+
 export interface MonthlyIncomeCow {
   cattle_id: string;
   name: string;
