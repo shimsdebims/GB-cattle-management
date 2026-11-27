@@ -3,15 +3,15 @@ const request = require('supertest');
 const { app, cattlePayload, feedingPayload } = require('./helpers');
 
 const addCow = async (overrides) =>
-  (await request(app).post('/api/cattle').send(cattlePayload(overrides))).body.data;
+  (await request(app).post('/api/cattle').send(cattlePayload(overrides)).expect(201)).body.data;
 const feed = (cattleId, overrides) =>
   request(app).post('/api/feeding').send(feedingPayload(cattleId, overrides)).expect(201);
 const grid = (month) => request(app).get('/api/feeding/monthly-grid').query({ month });
 
 describe('feed per cow / per day / per month', () => {
   test('rows per cow, columns per day, totals both ways, kg and FBu', async () => {
-    const a = await addCow({ tag_number: 'A1', name: 'Amani' });
-    const b = await addCow({ tag_number: 'B2', name: 'Bella' });
+    const a = await addCow({ tag_number: 'GBA1', name: 'Amani' });
+    const b = await addCow({ tag_number: 'GBB2', name: 'Bella' });
 
     // Amani: 1 Jul hay 10 kg × 500, 1 Jul silage 5 kg × 200 (same day adds up), 3 Jul 8 kg, no price
     await feed(a._id, { date_recorded: '2026-07-01', quantity_kg: 10, cost_per_unit: 500 });
@@ -27,7 +27,7 @@ describe('feed per cow / per day / per month', () => {
     const g = res.body.data;
 
     expect(g.days_in_month).toBe(31);
-    expect(g.cows.map((c) => c.tag)).toEqual(['A1', 'B2']); // most fed first
+    expect(g.cows.map((c) => c.tag)).toEqual(['GBA1', 'GBB2']); // most fed first
 
     const amani = g.cows[0];
     expect(amani.daily_kg).toHaveLength(31);
